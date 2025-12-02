@@ -5,15 +5,17 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { getAllVendors, getAllClassifications, saveClassification, getScoringMatrix, saveScoringMatrix } from '@/lib/db';
 import { VendorFormData, VendorClassification, ScoringMatrix, CAPEX_BANDS } from '@/types/vendor';
 import { VendorDetailModal } from '@/components/admin/VendorDetailModal';
 import { ScoringMatrixEditor } from '@/components/admin/ScoringMatrixEditor';
+import { AnalyticsCharts } from '@/components/admin/AnalyticsCharts';
 import { 
   Building2, Search, Filter, LogOut, CheckCircle2, AlertCircle, 
-  Mail, Eye, ArrowUpDown, Settings, Users, TrendingUp
+  Mail, Eye, ArrowUpDown, Settings, Users, TrendingUp, Trophy, BarChart3
 } from 'lucide-react';
 
 const AdminDashboard: React.FC = () => {
@@ -193,6 +195,10 @@ const AdminDashboard: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={() => navigate('/admin/rankings')}>
+                <Trophy className="w-4 h-4 mr-2" />
+                Rankings
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setShowScoring(true)}>
                 <Settings className="w-4 h-4 mr-2" />
                 Scoring Matrix
@@ -207,64 +213,77 @@ const AdminDashboard: React.FC = () => {
       </header>
 
       <div className="container mx-auto px-4 py-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Users className="w-5 h-5 text-primary" />
+        <Tabs defaultValue="vendors" className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="vendors" className="flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              Vendors
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Analytics
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="vendors" className="space-y-6">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="bg-card rounded-xl p-4 border border-border">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Users className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{stats.total}</p>
+                    <p className="text-sm text-muted-foreground">Total Vendors</p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <p className="text-2xl font-bold">{stats.total}</p>
-                <p className="text-sm text-muted-foreground">Total Vendors</p>
+              <div className="bg-card rounded-xl p-4 border border-border">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+                    <CheckCircle2 className="w-5 h-5 text-success" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{stats.complete}</p>
+                    <p className="text-sm text-muted-foreground">Complete</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-card rounded-xl p-4 border border-border">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
+                    <AlertCircle className="w-5 h-5 text-warning" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{stats.incomplete}</p>
+                    <p className="text-sm text-muted-foreground">Pending</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-card rounded-xl p-4 border border-border">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-info/10 flex items-center justify-center">
+                    <TrendingUp className="w-5 h-5 text-info" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{stats.capex}</p>
+                    <p className="text-sm text-muted-foreground">Capex</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-card rounded-xl p-4 border border-border">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                    <Building2 className="w-5 h-5 text-accent" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{stats.opex}</p>
+                    <p className="text-sm text-muted-foreground">Opex</p>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                <CheckCircle2 className="w-5 h-5 text-success" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats.complete}</p>
-                <p className="text-sm text-muted-foreground">Complete</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
-                <AlertCircle className="w-5 h-5 text-warning" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats.incomplete}</p>
-                <p className="text-sm text-muted-foreground">Pending</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-info/10 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-info" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats.capex}</p>
-                <p className="text-sm text-muted-foreground">Capex</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
-                <Building2 className="w-5 h-5 text-accent" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats.opex}</p>
-                <p className="text-sm text-muted-foreground">Opex</p>
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* Filters and Search */}
         <div className="bg-card rounded-xl border border-border p-4 mb-6">
@@ -460,6 +479,12 @@ const AdminDashboard: React.FC = () => {
             </table>
           </div>
         </div>
+          </TabsContent>
+
+          <TabsContent value="analytics">
+            <AnalyticsCharts vendors={vendors} classifications={classifications} />
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Vendor Detail Modal */}

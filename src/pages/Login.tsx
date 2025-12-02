@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useToast } from '@/hooks/use-toast';
 import { generateOTP, verifyOTP, createOrGetUser } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
-import { ADMIN_EMAIL } from '@/types/vendor';
+import { ADMIN_EMAIL, DUE_DILIGENCE_EMAIL } from '@/types/vendor';
 import { Mail, KeyRound, RefreshCw, ArrowLeft, Building2, Shield } from 'lucide-react';
 
 const Login: React.FC = () => {
@@ -74,6 +74,8 @@ const Login: React.FC = () => {
 
         if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
           navigate('/admin');
+        } else if (email.toLowerCase() === DUE_DILIGENCE_EMAIL.toLowerCase()) {
+          navigate('/due-diligence');
         } else {
           navigate('/vendor-form');
         }

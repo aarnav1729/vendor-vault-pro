@@ -7,15 +7,18 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Login from "./pages/Login";
 import VendorForm from "./pages/VendorForm";
 import AdminDashboard from "./pages/AdminDashboard";
+import VendorRanking from "./pages/VendorRanking";
+import DueDiligenceDashboard from "./pages/DueDiligenceDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean }> = ({ 
+const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean; dueDiligenceOnly?: boolean }> = ({ 
   children, 
-  adminOnly = false 
+  adminOnly = false,
+  dueDiligenceOnly = false
 }) => {
-  const { user, loading, isAdmin } = useAuth();
+  const { user, loading, isAdmin, isDueDiligence } = useAuth();
 
   if (loading) {
     return (
@@ -30,6 +33,10 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean 
   }
 
   if (adminOnly && !isAdmin) {
+    return <Navigate to="/vendor-form" replace />;
+  }
+
+  if (dueDiligenceOnly && !isDueDiligence) {
     return <Navigate to="/vendor-form" replace />;
   }
 
@@ -53,6 +60,22 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute adminOnly>
             <AdminDashboard />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/admin/rankings" 
+        element={
+          <ProtectedRoute adminOnly>
+            <VendorRanking />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/due-diligence" 
+        element={
+          <ProtectedRoute dueDiligenceOnly>
+            <DueDiligenceDashboard />
           </ProtectedRoute>
         } 
       />
