@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, ADMIN_EMAIL } from '@/types/vendor';
+import { User, ADMIN_EMAIL, DUE_DILIGENCE_EMAIL } from '@/types/vendor';
 import { getUser } from '@/lib/db';
 
 interface AuthContextType {
   user: User | null;
   setUser: (user: User | null) => void;
   isAdmin: boolean;
+  isDueDiligence: boolean;
   logout: () => void;
   loading: boolean;
 }
@@ -36,9 +37,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const isDueDiligence = user?.email?.toLowerCase() === DUE_DILIGENCE_EMAIL.toLowerCase();
 
   return (
-    <AuthContext.Provider value={{ user, setUser, isAdmin, logout, loading }}>
+    <AuthContext.Provider value={{ user, setUser, isAdmin, isDueDiligence, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

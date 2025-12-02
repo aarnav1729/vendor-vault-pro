@@ -138,6 +138,25 @@ export interface VendorScores {
   documents: number;
 }
 
+export interface FieldVerification {
+  verified: boolean;
+  comment?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+}
+
+export interface DueDiligenceVerification {
+  vendorId: string;
+  companyDetails: FieldVerification;
+  financialDetails: FieldVerification;
+  bankDetails: FieldVerification;
+  references: FieldVerification;
+  documents: FieldVerification;
+  overallStatus: 'pending' | 'in_progress' | 'verified' | 'rejected';
+  assignedAt: string;
+  completedAt?: string;
+}
+
 export interface VendorClassification {
   vendorId: string;
   vendorType: VendorType;
@@ -171,6 +190,7 @@ export interface User {
 }
 
 export const ADMIN_EMAIL = 'aarnav.singh@premierenergies.com';
+export const DUE_DILIGENCE_EMAIL = 'duediligence@premierenergies.com';
 
 export const ORGANISATION_TYPES = [
   'Private Limited',

@@ -4,6 +4,7 @@ import {
   User, 
   VendorClassification, 
   ScoringMatrix,
+  DueDiligenceVerification,
   DEFAULT_DOCUMENTS 
 } from '@/types/vendor';
 
@@ -27,28 +28,43 @@ interface VendorDB extends DBSchema {
     key: string;
     value: ScoringMatrix;
   };
+  dueDiligence: {
+    key: string;
+    value: DueDiligenceVerification;
+    indexes: { 'by-vendorId': string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<VendorDB>> | null = null;
 
 export const getDB = async () => {
   if (!dbPromise) {
-    dbPromise = openDB<VendorDB>('vendor-management-db', 1, {
-      upgrade(db) {
-        // Users store
-        const userStore = db.createObjectStore('users', { keyPath: 'email' });
-        userStore.createIndex('by-email', 'email');
+    dbPromise = openDB<VendorDB>('vendor-management-db', 2, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          // Users store
+          const userStore = db.createObjectStore('users', { keyPath: 'email' });
+          userStore.createIndex('by-email', 'email');
 
-        // Vendors store
-        const vendorStore = db.createObjectStore('vendors', { keyPath: 'id' });
-        vendorStore.createIndex('by-email', 'email');
+          // Vendors store
+          const vendorStore = db.createObjectStore('vendors', { keyPath: 'id' });
+          vendorStore.createIndex('by-email', 'email');
 
-        // Classifications store
-        const classStore = db.createObjectStore('classifications', { keyPath: 'vendorId' });
-        classStore.createIndex('by-vendorId', 'vendorId');
+          // Classifications store
+          const classStore = db.createObjectStore('classifications', { keyPath: 'vendorId' });
+          classStore.createIndex('by-vendorId', 'vendorId');
 
-        // Scoring matrix store
-        db.createObjectStore('scoringMatrix', { keyPath: 'id' });
+          // Scoring matrix store
+          db.createObjectStore('scoringMatrix', { keyPath: 'id' });
+        }
+        
+        if (oldVersion < 2) {
+          // Due diligence store
+          if (!db.objectStoreNames.contains('dueDiligence')) {
+            const ddStore = db.createObjectStore('dueDiligence', { keyPath: 'vendorId' });
+            ddStore.createIndex('by-vendorId', 'vendorId');
+          }
+        }
       },
     });
   }
@@ -314,4 +330,20 @@ export const fileToBase64 = (file: File): Promise<string> => {
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
   });
+};
+
+// Due Diligence functions
+export const saveDueDiligenceVerification = async (verification: DueDiligenceVerification): Promise<void> => {
+  const db = await getDB();
+  await db.put('dueDiligence', verification);
+};
+
+export const getDueDiligenceVerification = async (vendorId: string): Promise<DueDiligenceVerification | undefined> => {
+  const db = await getDB();
+  return db.get('dueDiligence', vendorId);
+};
+
+export const getDueDiligenceVerifications = async (): Promise<DueDiligenceVerification[]> => {
+  const db = await getDB();
+  return db.getAll('dueDiligence');
 };
