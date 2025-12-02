@@ -140,7 +140,7 @@ const Login: React.FC = () => {
         </div>
 
         <p className="text-primary-foreground/60 text-sm">
-          © 2024 Premier Energies Limited. All rights reserved.
+          © 2025 Premier Energies Limited. All rights reserved.
         </p>
       </div>
 
