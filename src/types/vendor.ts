@@ -79,6 +79,7 @@ export interface ContactPerson {
   baseLocation: string;
   contactNumber: string;
   mailId: string;
+  isPrimary: boolean;
 }
 
 export interface StoredFile {

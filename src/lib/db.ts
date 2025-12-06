@@ -191,6 +191,7 @@ export const createEmptyVendorForm = (email: string): VendorFormData => {
       baseLocation: '',
       contactNumber: '',
       mailId: '',
+      isPrimary: false,
     })),
     documents: DEFAULT_DOCUMENTS.map(name => ({
       docName: name,
