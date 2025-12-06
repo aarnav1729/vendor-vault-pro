@@ -82,18 +82,6 @@ export const FinancialDetailsSection: React.FC<Props> = ({ data, onChange }) => 
           </table>
         </div>
 
-        <div className="mt-4">
-          <label className="input-label">Supporting Documents</label>
-          <FileUpload
-            files={data.annualTurnover.attachments}
-            onChange={(files) => onChange({
-              ...data,
-              annualTurnover: { ...data.annualTurnover, attachments: files }
-            })}
-            accept=".pdf,.jpg,.jpeg,.png,.xls,.xlsx"
-            maxFiles={10}
-          />
-        </div>
       </div>
 
       {/* Employment Details Table */}

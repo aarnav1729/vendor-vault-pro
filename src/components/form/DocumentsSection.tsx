@@ -1,22 +1,28 @@
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { VendorDocument } from '@/types/vendor';
 import { FileUpload } from '@/components/form/FileUpload';
-import { FolderOpen, Plus, Trash2 } from 'lucide-react';
+import { FolderOpen, Plus, Trash2, AlertCircle } from 'lucide-react';
 
 interface Props {
   data: VendorDocument[];
   onChange: (data: VendorDocument[]) => void;
+  showErrors?: boolean;
 }
 
-export const DocumentsSection: React.FC<Props> = ({ data, onChange }) => {
+export const DocumentsSection: React.FC<Props> = ({ data, onChange, showErrors = false }) => {
   const [newDocName, setNewDocName] = useState('');
 
   const updateDocument = (index: number, field: keyof VendorDocument, value: any) => {
     const updated = [...data];
     updated[index] = { ...updated[index], [field]: value };
+    // Auto-set attached to true when files are uploaded
+    if (field === 'files' && value.length > 0) {
+      updated[index].attached = true;
+    } else if (field === 'files' && value.length === 0) {
+      updated[index].attached = false;
+    }
     onChange(updated);
   };
 
@@ -36,37 +42,41 @@ export const DocumentsSection: React.FC<Props> = ({ data, onChange }) => {
     onChange(updated);
   };
 
+  const isMissingFile = (doc: VendorDocument) => {
+    return showErrors && doc.files.length === 0;
+  };
+
   return (
     <div className="form-section animate-slide-up">
       <h2 className="form-section-title">
         <FolderOpen className="w-5 h-5 text-primary" />
         Vendor Document List
+        <span className="text-destructive ml-1">*</span>
       </h2>
+      
+      <p className="text-sm text-muted-foreground mb-4">
+        All documents are mandatory. Please upload each document.
+      </p>
 
       <div className="space-y-4">
         {data.map((doc, index) => (
           <div 
             key={index} 
-            className="border border-border rounded-lg p-4 hover:border-primary/30 transition-colors"
+            className={`border rounded-lg p-4 transition-colors ${
+              isMissingFile(doc) 
+                ? 'border-destructive bg-destructive/5' 
+                : 'border-border hover:border-primary/30'
+            }`}
           >
             <div className="flex items-start justify-between gap-4 mb-3">
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium text-muted-foreground w-8">
                   {index + 1}.
                 </span>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    checked={doc.attached}
-                    onCheckedChange={(checked) => updateDocument(index, 'attached', !!checked)}
-                    id={`doc-${index}`}
-                  />
-                  <label 
-                    htmlFor={`doc-${index}`}
-                    className="font-medium cursor-pointer"
-                  >
-                    {doc.docName}
-                  </label>
-                </div>
+                <span className="font-medium">
+                  {doc.docName}
+                  <span className="text-destructive ml-1">*</span>
+                </span>
               </div>
               {index >= 10 && (
                 <Button
@@ -80,24 +90,28 @@ export const DocumentsSection: React.FC<Props> = ({ data, onChange }) => {
               )}
             </div>
 
-            {doc.attached && (
-              <div className="ml-11 space-y-3">
-                <FileUpload
-                  files={doc.files}
-                  onChange={(files) => updateDocument(index, 'files', files)}
-                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
-                  maxFiles={5}
-                />
-                <div className="space-y-1.5">
-                  <label className="text-sm text-muted-foreground">Remarks (if any)</label>
-                  <Input
-                    value={doc.remarks || ''}
-                    onChange={(e) => updateDocument(index, 'remarks', e.target.value)}
-                    placeholder="Add any remarks..."
-                  />
+            <div className="ml-11 space-y-3">
+              {isMissingFile(doc) && (
+                <div className="flex items-center gap-2 text-destructive text-sm">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>This document is required</span>
                 </div>
+              )}
+              <FileUpload
+                files={doc.files}
+                onChange={(files) => updateDocument(index, 'files', files)}
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                maxFiles={5}
+              />
+              <div className="space-y-1.5">
+                <label className="text-sm text-muted-foreground">Remarks (if any)</label>
+                <Input
+                  value={doc.remarks || ''}
+                  onChange={(e) => updateDocument(index, 'remarks', e.target.value)}
+                  placeholder="Add any remarks..."
+                />
               </div>
-            )}
+            </div>
           </div>
         ))}
 
