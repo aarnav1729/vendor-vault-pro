@@ -1,30 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/AuthContext';
-import { getVendorByEmail, createEmptyVendorForm, saveVendorForm } from '@/lib/db';
-import { VendorFormData, ContactPerson } from '@/types/vendor';
-import { CompanyDetailsSection } from '@/components/form/CompanyDetailsSection';
-import { FinancialDetailsSection } from '@/components/form/FinancialDetailsSection';
-import { BankDetailsSection } from '@/components/form/BankDetailsSection';
-import { VendorReferencesSection } from '@/components/form/VendorReferencesSection';
-import { ContactPersonsSection } from '@/components/form/ContactPersonsSection';
-import { DocumentsSection } from '@/components/form/DocumentsSection';
-import { FormPreviewModal } from '@/components/form/FormPreviewModal';
-import { 
-  Building2, TrendingUp, Landmark, FileCheck, Users, FolderOpen, 
-  Save, ChevronLeft, ChevronRight, LogOut, CheckCircle2, AlertCircle
-} from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  getVendorByEmail,
+  createEmptyVendorForm,
+  saveVendorForm,
+  submitVendorForm,
+} from "@/lib/db";
+
+import { VendorFormData, ContactPerson } from "@/types/vendor";
+import { CompanyDetailsSection } from "@/components/form/CompanyDetailsSection";
+import { FinancialDetailsSection } from "@/components/form/FinancialDetailsSection";
+import { BankDetailsSection } from "@/components/form/BankDetailsSection";
+import { VendorReferencesSection } from "@/components/form/VendorReferencesSection";
+import { ContactPersonsSection } from "@/components/form/ContactPersonsSection";
+import { DocumentsSection } from "@/components/form/DocumentsSection";
+import { FormPreviewModal } from "@/components/form/FormPreviewModal";
+import {
+  Building2,
+  TrendingUp,
+  Landmark,
+  FileCheck,
+  Users,
+  FolderOpen,
+  Save,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 
 const SECTIONS = [
-  { id: 'company', label: 'Company Details', icon: Building2 },
-  { id: 'financial', label: 'Financial Details', icon: TrendingUp },
-  { id: 'bank', label: 'Bank Details', icon: Landmark },
-  { id: 'references', label: 'References', icon: FileCheck },
-  { id: 'contacts', label: 'Contact Persons', icon: Users },
-  { id: 'documents', label: 'Documents', icon: FolderOpen },
+  { id: "company", label: "Company Details", icon: Building2 },
+  { id: "financial", label: "Financial Details", icon: TrendingUp },
+  { id: "bank", label: "Bank Details", icon: Landmark },
+  { id: "references", label: "References", icon: FileCheck },
+  { id: "contacts", label: "Contact Persons", icon: Users },
+  { id: "documents", label: "Documents", icon: FolderOpen },
 ];
 
 interface ValidationErrors {
@@ -58,7 +74,7 @@ const VendorForm: React.FC = () => {
 
   useEffect(() => {
     if (!user?.verified) {
-      navigate('/');
+      navigate("/");
       return;
     }
     loadVendorData();
@@ -66,21 +82,21 @@ const VendorForm: React.FC = () => {
 
   const loadVendorData = async () => {
     if (!user?.email) return;
-    
+
     let vendor = await getVendorByEmail(user.email);
     if (!vendor) {
       vendor = createEmptyVendorForm(user.email);
       // Initialize isPrimary field for contacts
       vendor.contactPersons = vendor.contactPersons.map((c, i) => ({
         ...c,
-        isPrimary: false
+        isPrimary: false,
       }));
-      await saveVendorForm(vendor);
+      vendor = await saveVendorForm(vendor);
     } else {
       // Ensure isPrimary field exists for existing data
-      vendor.contactPersons = vendor.contactPersons.map(c => ({
+      vendor.contactPersons = vendor.contactPersons.map((c) => ({
         ...c,
-        isPrimary: c.isPrimary ?? false
+        isPrimary: c.isPrimary ?? false,
       }));
     }
     setFormData(vendor);
@@ -100,117 +116,153 @@ const VendorForm: React.FC = () => {
 
     // Company Details validation
     const cd = formData.companyDetails;
-    if (!cd.companyName) errors.companyDetails.push('Company Name is required');
-    if (!cd.managingDirectorName) errors.companyDetails.push('Managing Director/CEO Name is required');
-    if (!cd.cinNumber) errors.companyDetails.push('CIN Number is required');
-    if (!cd.yearOfEstablishment) errors.companyDetails.push('Year of Establishment is required');
-    if (!cd.gstNumber) errors.companyDetails.push('GST Number is required');
-    if (!cd.companyOrigin) errors.companyDetails.push('Company Origin is required');
-    if (!cd.panNumber) errors.companyDetails.push('PAN Number is required');
-    if (!cd.registeredAddress.line1) errors.companyDetails.push('Address Line 1 is required');
-    if (!cd.registeredAddress.pinCode) errors.companyDetails.push('PIN Code is required');
-    if (!cd.registeredAddress.district) errors.companyDetails.push('District is required');
-    if (!cd.registeredAddress.state) errors.companyDetails.push('State is required');
+    if (!cd.companyName) errors.companyDetails.push("Company Name is required");
+    if (!cd.managingDirectorName)
+      errors.companyDetails.push("Managing Director/CEO Name is required");
+    if (!cd.cinNumber) errors.companyDetails.push("CIN Number is required");
+    if (!cd.yearOfEstablishment)
+      errors.companyDetails.push("Year of Establishment is required");
+    if (!cd.gstNumber) errors.companyDetails.push("GST Number is required");
+    if (!cd.companyOrigin)
+      errors.companyDetails.push("Company Origin is required");
+    if (!cd.panNumber) errors.companyDetails.push("PAN Number is required");
+    if (!cd.registeredAddress.line1)
+      errors.companyDetails.push("Address Line 1 is required");
+    if (!cd.registeredAddress.pinCode)
+      errors.companyDetails.push("PIN Code is required");
+    if (!cd.registeredAddress.district)
+      errors.companyDetails.push("District is required");
+    if (!cd.registeredAddress.state)
+      errors.companyDetails.push("State is required");
 
     // Bank Details validation
     const bd = formData.bankDetails;
-    if (!bd.bankName) errors.bankDetails.push('Bank Name is required');
-    if (!bd.branch) errors.bankDetails.push('Branch is required');
-    if (!bd.accountNumber) errors.bankDetails.push('Account Number is required');
-    if (!bd.ifscCode) errors.bankDetails.push('IFSC Code is required');
+    if (!bd.bankName) errors.bankDetails.push("Bank Name is required");
+    if (!bd.branch) errors.bankDetails.push("Branch is required");
+    if (!bd.accountNumber)
+      errors.bankDetails.push("Account Number is required");
+    if (!bd.ifscCode) errors.bankDetails.push("IFSC Code is required");
 
     // Contact Persons validation
     const contacts = formData.contactPersons;
-    const isContactComplete = (c: ContactPerson) => c.name && c.designation && c.contactNumber && c.mailId;
+    const isContactComplete = (c: ContactPerson) =>
+      c.name && c.designation && c.contactNumber && c.mailId;
     const filledContacts = contacts.filter(isContactComplete);
-    
+
     if (filledContacts.length < 2) {
-      errors.contacts.push('At least 2 complete contact persons are required');
+      errors.contacts.push("At least 2 complete contact persons are required");
     }
-    if (!contacts.some(c => c.isPrimary && isContactComplete(c))) {
-      errors.contacts.push('At least one contact must be marked as primary');
+    if (!contacts.some((c) => c.isPrimary && isContactComplete(c))) {
+      errors.contacts.push("At least one contact must be marked as primary");
     }
 
     // Documents validation
-    const missingDocs = formData.documents.filter(doc => doc.files.length === 0);
+    const missingDocs = formData.documents.filter(
+      (doc) => doc.files.length === 0
+    );
     if (missingDocs.length > 0) {
-      errors.documents.push(`Missing documents: ${missingDocs.map(d => d.docName).join(', ')}`);
+      errors.documents.push(
+        `Missing documents: ${missingDocs.map((d) => d.docName).join(", ")}`
+      );
     }
 
     // References validation (at least 3 required)
-    const filledRefs = formData.vendorReferences.filter(ref => ref.companyName);
+    const filledRefs = formData.vendorReferences.filter(
+      (ref) => ref.companyName
+    );
     if (filledRefs.length < 3) {
-      errors.references.push('At least 3 vendor references are required');
+      errors.references.push("At least 3 vendor references are required");
     }
 
     setValidationErrors(errors);
 
-    const hasErrors = Object.values(errors).some(arr => arr.length > 0);
+    const hasErrors = Object.values(errors).some((arr) => arr.length > 0);
     return !hasErrors;
   };
 
-  const handleSave = async () => {
+  const handleSave = async (opts?: { silent?: boolean }) => {
     if (!formData) return;
-    
+
     setSaving(true);
     try {
-      await saveVendorForm(formData);
+      const saved = await saveVendorForm(formData); // now returns vendor from server
+      setFormData(saved);
       setLastSaved(new Date());
-      toast({
-        title: 'Saved',
-        description: 'Your progress has been saved.',
-      });
+
+      if (!opts?.silent) {
+        toast({
+          title: "Saved",
+          description: "Your progress has been saved.",
+        });
+      }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to save. Please try again.',
-        variant: 'destructive',
-      });
+      if (!opts?.silent) {
+        toast({
+          title: "Error",
+          description: "Failed to save. Please try again.",
+          variant: "destructive",
+        });
+      }
     }
     setSaving(false);
   };
 
   const handleLogout = () => {
     logout();
-    navigate('/');
+    navigate("/");
+  };
+
+  const goToSection = async (index: number) => {
+    if (index === activeSection) return;
+    await handleSave({ silent: true });
+    setActiveSection(index);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleNext = async () => {
-    await handleSave();
+    await handleSave({ silent: true });
+
     if (activeSection < SECTIONS.length - 1) {
       setActiveSection(activeSection + 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
   const handlePrevious = () => {
     if (activeSection > 0) {
       setActiveSection(activeSection - 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
   const handleSubmitClick = async () => {
     await handleSave();
     setShowErrors(true);
-    
+
     const isValid = validateForm();
-    
+
     if (!isValid) {
       // Find first section with errors and navigate to it
-      const sectionKeys = ['companyDetails', 'financialDetails', 'bankDetails', 'references', 'contacts', 'documents'];
-      const firstErrorSection = sectionKeys.findIndex(key => 
-        validationErrors[key as keyof ValidationErrors].length > 0
+      const sectionKeys = [
+        "companyDetails",
+        "financialDetails",
+        "bankDetails",
+        "references",
+        "contacts",
+        "documents",
+      ];
+      const firstErrorSection = sectionKeys.findIndex(
+        (key) => validationErrors[key as keyof ValidationErrors].length > 0
       );
-      
+
       if (firstErrorSection !== -1 && firstErrorSection !== activeSection) {
         setActiveSection(firstErrorSection);
       }
-      
+
       toast({
-        title: 'Validation Error',
-        description: 'Please fill all mandatory fields before submitting.',
-        variant: 'destructive',
+        title: "Validation Error",
+        description: "Please fill all mandatory fields before submitting.",
+        variant: "destructive",
       });
       return;
     }
@@ -220,27 +272,30 @@ const VendorForm: React.FC = () => {
 
   const handleFinalSubmit = async () => {
     if (!formData) return;
-    
+
     setSubmitting(true);
     try {
-      const updatedForm = {
+      const updatedForm: any = {
         ...formData,
         completionPercentage: 100,
         updatedAt: new Date().toISOString(),
+        submitted: true,
       };
-      await saveVendorForm(updatedForm);
-      setFormData(updatedForm);
+
+      const saved = await submitVendorForm(updatedForm);
+      setFormData(saved);
+
       setShowPreview(false);
-      
+
       toast({
-        title: 'Submitted Successfully!',
-        description: 'Your vendor registration form has been submitted.',
+        title: "Submitted Successfully!",
+        description: "Your vendor registration form has been submitted.",
       });
     } catch (error) {
       toast({
-        title: 'Submission Failed',
-        description: 'Please try again.',
-        variant: 'destructive',
+        title: "Submission Failed",
+        description: "Please try again.",
+        variant: "destructive",
       });
     }
     setSubmitting(false);
@@ -255,7 +310,14 @@ const VendorForm: React.FC = () => {
   }
 
   const getSectionErrors = (sectionIndex: number): string[] => {
-    const keys = ['companyDetails', 'financialDetails', 'bankDetails', 'references', 'contacts', 'documents'];
+    const keys = [
+      "companyDetails",
+      "financialDetails",
+      "bankDetails",
+      "references",
+      "contacts",
+      "documents",
+    ];
     return validationErrors[keys[sectionIndex] as keyof ValidationErrors] || [];
   };
 
@@ -265,14 +327,18 @@ const VendorForm: React.FC = () => {
         return (
           <CompanyDetailsSection
             data={formData.companyDetails}
-            onChange={(data) => setFormData({ ...formData, companyDetails: data })}
+            onChange={(data) =>
+              setFormData({ ...formData, companyDetails: data })
+            }
           />
         );
       case 1:
         return (
           <FinancialDetailsSection
             data={formData.financialDetails}
-            onChange={(data) => setFormData({ ...formData, financialDetails: data })}
+            onChange={(data) =>
+              setFormData({ ...formData, financialDetails: data })
+            }
           />
         );
       case 2:
@@ -286,14 +352,18 @@ const VendorForm: React.FC = () => {
         return (
           <VendorReferencesSection
             data={formData.vendorReferences}
-            onChange={(data) => setFormData({ ...formData, vendorReferences: data })}
+            onChange={(data) =>
+              setFormData({ ...formData, vendorReferences: data })
+            }
           />
         );
       case 4:
         return (
           <ContactPersonsSection
             data={formData.contactPersons}
-            onChange={(data) => setFormData({ ...formData, contactPersons: data })}
+            onChange={(data) =>
+              setFormData({ ...formData, contactPersons: data })
+            }
             showErrors={showErrors}
           />
         );
@@ -331,9 +401,14 @@ const VendorForm: React.FC = () => {
                   Last saved: {lastSaved.toLocaleTimeString()}
                 </span>
               )}
-              <Button variant="outline" size="sm" onClick={handleSave} disabled={saving}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSave}
+                disabled={saving}
+              >
                 <Save className="w-4 h-4 mr-2" />
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? "Saving..." : "Save"}
               </Button>
               <Button variant="ghost" size="sm" onClick={handleLogout}>
                 <LogOut className="w-4 h-4 mr-2" />
@@ -346,7 +421,9 @@ const VendorForm: React.FC = () => {
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">Form Completion</span>
-              <span className="text-sm text-muted-foreground">{formData.completionPercentage}%</span>
+              <span className="text-sm text-muted-foreground">
+                {formData.completionPercentage}%
+              </span>
             </div>
             <Progress value={formData.completionPercentage} className="h-2" />
           </div>
@@ -362,29 +439,32 @@ const VendorForm: React.FC = () => {
                 const Icon = section.icon;
                 const isActive = index === activeSection;
                 const isCompleted = index < activeSection;
-                const hasErrors = showErrors && getSectionErrors(index).length > 0;
-                
+                const hasErrors =
+                  showErrors && getSectionErrors(index).length > 0;
+
                 return (
                   <button
                     key={section.id}
-                    onClick={() => setActiveSection(index)}
+                    onClick={() => goToSection(index)}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all ${
                       isActive
-                        ? 'bg-primary text-primary-foreground shadow-soft'
+                        ? "bg-primary text-primary-foreground shadow-soft"
                         : hasErrors
-                          ? 'bg-destructive/10 border border-destructive/30'
-                          : 'hover:bg-muted'
+                        ? "bg-destructive/10 border border-destructive/30"
+                        : "hover:bg-muted"
                     }`}
                   >
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      isActive 
-                        ? 'bg-primary-foreground/20' 
-                        : hasErrors
-                          ? 'bg-destructive/20 text-destructive'
-                          : isCompleted 
-                            ? 'bg-success/20 text-success'
-                            : 'bg-muted'
-                    }`}>
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                        isActive
+                          ? "bg-primary-foreground/20"
+                          : hasErrors
+                          ? "bg-destructive/20 text-destructive"
+                          : isCompleted
+                          ? "bg-success/20 text-success"
+                          : "bg-muted"
+                      }`}
+                    >
                       {hasErrors ? (
                         <AlertCircle className="w-4 h-4" />
                       ) : isCompleted ? (
@@ -408,21 +488,26 @@ const VendorForm: React.FC = () => {
                 {SECTIONS.map((section, index) => {
                   const Icon = section.icon;
                   const isActive = index === activeSection;
-                  const hasErrors = showErrors && getSectionErrors(index).length > 0;
-                  
+                  const hasErrors =
+                    showErrors && getSectionErrors(index).length > 0;
+
                   return (
                     <button
                       key={section.id}
-                      onClick={() => setActiveSection(index)}
+                      onClick={() => goToSection(index)}
                       className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
                         isActive
-                          ? 'bg-primary text-primary-foreground'
+                          ? "bg-primary text-primary-foreground"
                           : hasErrors
-                            ? 'bg-destructive/10 text-destructive border border-destructive/30'
-                            : 'bg-muted hover:bg-muted/80'
+                          ? "bg-destructive/10 text-destructive border border-destructive/30"
+                          : "bg-muted hover:bg-muted/80"
                       }`}
                     >
-                      {hasErrors ? <AlertCircle className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
+                      {hasErrors ? (
+                        <AlertCircle className="w-4 h-4" />
+                      ) : (
+                        <Icon className="w-4 h-4" />
+                      )}
                       {section.label}
                     </button>
                   );
@@ -436,7 +521,9 @@ const VendorForm: React.FC = () => {
                 <div className="flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="font-medium text-destructive">Please fix the following errors:</h4>
+                    <h4 className="font-medium text-destructive">
+                      Please fix the following errors:
+                    </h4>
                     <ul className="mt-2 text-sm text-destructive space-y-1">
                       {getSectionErrors(activeSection).map((error, i) => (
                         <li key={i}>• {error}</li>
@@ -471,7 +558,11 @@ const VendorForm: React.FC = () => {
                   <ChevronRight className="w-4 h-4 ml-2" />
                 </Button>
               ) : (
-                <Button variant="accent" onClick={handleSubmitClick} disabled={saving}>
+                <Button
+                  variant="accent"
+                  onClick={handleSubmitClick}
+                  disabled={saving}
+                >
                   <CheckCircle2 className="w-4 h-4 mr-2" />
                   Review & Submit
                 </Button>
