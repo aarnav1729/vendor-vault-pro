@@ -3,9 +3,10 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useMemo,
   ReactNode,
 } from "react";
-import { User, ADMIN_EMAIL, DUE_DILIGENCE_EMAIL } from "@/types/vendor";
+import { User, ADMIN_EMAILS, DUE_DILIGENCE_EMAIL } from "@/types/vendor";
 
 interface AuthContextType {
   user: User | null;
@@ -65,9 +66,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     setUser(null);
   };
 
+  const adminSet = useMemo(
+    () => new Set(ADMIN_EMAILS.map((e) => String(e).trim().toLowerCase())),
+    []
+  );
+
   const isAdmin =
     !!(user as any)?.isAdmin ||
-    user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    adminSet.has(
+      String(user?.email || "")
+        .trim()
+        .toLowerCase()
+    );
 
   const isDueDiligence =
     !!(user as any)?.isDueDiligence ||

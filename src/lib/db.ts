@@ -6,6 +6,7 @@ import {
   ScoringMatrix,
   DueDiligenceVerification,
   DEFAULT_DOCUMENTS,
+  ADMIN_EMAILS,
 } from "@/types/vendor";
 
 interface VendorDB extends DBSchema {
@@ -192,7 +193,10 @@ export const createOrGetUser = async (email: string): Promise<User> => {
   if (!user) {
     user = {
       email,
-      isAdmin: email.toLowerCase() === "aarnav.singh@premierenergies.com",
+      isAdmin: ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(
+        email.toLowerCase()
+      ),
+
       verified: false,
     };
     await db.put("users", user);
@@ -412,21 +416,102 @@ export const getVendorByEmail = async (
 export const getVendorById = async (
   id: string
 ): Promise<VendorFormData | undefined> => {
-  const db = await getDB();
-  return db.get("vendors", id);
+  // For admin: fetch full vendor JSON from server (source of truth).
+  try {
+    const data = await apiJson<{ ok: true; vendor: VendorFormData }>(
+      `/admin/vendors/${id}`
+    );
+
+    // cache best-effort
+    try {
+      const db = await getDB();
+      await db.put("vendors", data.vendor);
+    } catch {
+      // ignore cache failure
+    }
+
+    return data.vendor;
+  } catch {
+    // fallback to IndexedDB
+    const db = await getDB();
+    return db.get("vendors", id);
+  }
 };
 
 export const getAllVendors = async (): Promise<VendorFormData[]> => {
-  const db = await getDB();
-  return db.getAll("vendors");
+  // Admin should see server truth (MSSQL). Fallback to IndexedDB only if API fails.
+  try {
+    const data = await apiJson<{
+      ok: true;
+      vendors: Array<{
+        id: string;
+        email: string;
+        companyName: string;
+        completionPercentage: number;
+        submitted?: boolean;
+        submittedAt?: string | null;
+        createdAt?: string | null;
+        updatedAt?: string | null;
+      }>;
+    }>("/admin/vendors");
+
+    const list: VendorFormData[] = data.vendors.map((s) => {
+      // Create a safe, full-ish VendorFormData shape so AdminDashboard doesn't crash
+      const v = createEmptyVendorForm(s.email);
+
+      v.id = s.id;
+      v.email = s.email;
+      v.companyDetails.companyName = s.companyName || "";
+      v.completionPercentage = Number(s.completionPercentage || 0);
+      v.createdAt = s.createdAt || v.createdAt;
+      v.updatedAt = s.updatedAt || v.updatedAt;
+
+      // These may exist in your types; harmless if not used elsewhere
+      (v as any).submitted = !!s.submitted;
+      (v as any).submittedAt = s.submittedAt ?? null;
+
+      return v;
+    });
+
+    // Best-effort cache
+    try {
+      const db = await getDB();
+      await Promise.all(list.map((v) => db.put("vendors", v)));
+    } catch {
+      // ignore cache failures
+    }
+
+    return list;
+  } catch {
+    // Offline / server error fallback
+    const db = await getDB();
+    return db.getAll("vendors");
+  }
 };
 
 // Classification functions
 export const saveClassification = async (
   classification: VendorClassification
 ): Promise<void> => {
-  const db = await getDB();
-  await db.put("classifications", classification);
+  const vendorId = String((classification as any).vendorId || "");
+  if (!vendorId) throw new Error("MISSING_VENDOR_ID");
+
+  // Save to server first
+  const saved = await apiJson<{
+    ok: true;
+    classification: VendorClassification;
+  }>(`/admin/classifications/${vendorId}`, {
+    method: "PUT",
+    body: JSON.stringify({ classification }),
+  });
+
+  // Cache locally best-effort
+  try {
+    const db = await getDB();
+    await db.put("classifications", saved.classification);
+  } catch {
+    // ignore
+  }
 };
 
 export const getClassification = async (
@@ -439,35 +524,83 @@ export const getClassification = async (
 export const getAllClassifications = async (): Promise<
   VendorClassification[]
 > => {
-  const db = await getDB();
-  return db.getAll("classifications");
+  try {
+    const data = await apiJson<{
+      ok: true;
+      classifications: VendorClassification[];
+    }>("/admin/classifications");
+
+    // cache best-effort
+    try {
+      const db = await getDB();
+      await Promise.all(
+        data.classifications.map((c) => db.put("classifications", c))
+      );
+    } catch {
+      // ignore
+    }
+
+    return data.classifications;
+  } catch {
+    const db = await getDB();
+    return db.getAll("classifications");
+  }
 };
 
 // Scoring Matrix functions
 export const getScoringMatrix = async (): Promise<ScoringMatrix> => {
-  const db = await getDB();
-  let matrix = await db.get("scoringMatrix", "default");
+  try {
+    const data = await apiJson<{ ok: true; matrix: ScoringMatrix }>(
+      "/scoring-matrix"
+    );
 
-  if (!matrix) {
-    matrix = {
-      id: "default",
-      companyDetailsWeight: 20,
-      financialDetailsWeight: 25,
-      bankDetailsWeight: 15,
-      referencesWeight: 25,
-      documentsWeight: 15,
-    };
-    await db.put("scoringMatrix", matrix);
+    // cache best-effort
+    try {
+      const db = await getDB();
+      await db.put("scoringMatrix", data.matrix);
+    } catch {
+      // ignore
+    }
+
+    return data.matrix;
+  } catch {
+    // fallback to IndexedDB default behavior
+    const db = await getDB();
+    let matrix = await db.get("scoringMatrix", "default");
+
+    if (!matrix) {
+      matrix = {
+        id: "default",
+        companyDetailsWeight: 20,
+        financialDetailsWeight: 25,
+        bankDetailsWeight: 15,
+        referencesWeight: 25,
+        documentsWeight: 15,
+      };
+      await db.put("scoringMatrix", matrix);
+    }
+    return matrix;
   }
-
-  return matrix;
 };
 
 export const saveScoringMatrix = async (
   matrix: ScoringMatrix
 ): Promise<void> => {
-  const db = await getDB();
-  await db.put("scoringMatrix", matrix);
+  const saved = await apiJson<{ ok: true; matrix: ScoringMatrix }>(
+    "/scoring-matrix",
+    {
+      method: "PUT",
+      body: JSON.stringify({ matrix }),
+    }
+  );
+
+  // cache best-effort
+  try {
+    const db = await getDB();
+    await db.put("scoringMatrix", saved.matrix);
+  } catch {
+    // ignore
+  }
 };
 
 // Utility functions

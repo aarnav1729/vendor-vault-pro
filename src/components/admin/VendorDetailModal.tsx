@@ -162,8 +162,15 @@ export const VendorDetailModal: React.FC<Props> = ({
       return { url: directUrl, mime, name };
     }
 
-    const dataUrl = file?.dataUrl || file?.dataURI;
-    if (dataUrl && typeof dataUrl === "string") {
+    // data URL stored under various keys
+    const dataUrl =
+      (typeof file?.dataUrl === "string" && file.dataUrl) ||
+      (typeof file?.dataURI === "string" && file.dataURI) ||
+      (typeof file?.data === "string" && file.data.startsWith("data:")
+        ? file.data
+        : "");
+
+    if (dataUrl) {
       const inferred = dataUrl.startsWith("data:")
         ? dataUrl.slice(5, dataUrl.indexOf(";")) || ""
         : mime;
@@ -177,11 +184,111 @@ export const VendorDetailModal: React.FC<Props> = ({
       return { url: `data:${safeMime};base64,${base64}`, mime: safeMime, name };
     }
 
+    // bytes stored as ArrayBuffer / Uint8Array / Buffer-like
+    const bytes =
+      file?.bytes ||
+      file?.data ||
+      file?.buffer ||
+      file?.arrayBuffer ||
+      file?.content;
+
+    // Handle Node Buffer JSON shape: { type: "Buffer", data: number[] }
+    const bufJson =
+      file?.type === "Buffer" && Array.isArray(file?.data)
+        ? file
+        : bytes?.type === "Buffer" && Array.isArray(bytes?.data)
+        ? bytes
+        : null;
+
+    if (bufJson) {
+      try {
+        const safeMime = mime || "application/octet-stream";
+        const u8 = new Uint8Array(bufJson.data);
+        const blob = new Blob([u8], { type: safeMime });
+        const url = URL.createObjectURL(blob);
+        return { url, mime: safeMime, name };
+      } catch {
+        // fall through
+      }
+    }
+
+    // Handle raw number[] bytes
+    if (Array.isArray(bytes) && bytes.every((n) => typeof n === "number")) {
+      try {
+        const safeMime = mime || "application/octet-stream";
+        const u8 = new Uint8Array(bytes);
+        const blob = new Blob([u8], { type: safeMime });
+        const url = URL.createObjectURL(blob);
+        return { url, mime: safeMime, name };
+      } catch {
+        // fall through
+      }
+    }
+
+    // If the stored object directly contains bytes, convert to Blob URL
+    if (bytes) {
+      try {
+        const safeMime = mime || "application/octet-stream";
+
+        // Already a Blob
+        if (bytes instanceof Blob) {
+          const url = URL.createObjectURL(bytes);
+          return {
+            url,
+            mime: (bytes as any).type || safeMime,
+            name,
+          };
+        }
+
+        // ArrayBuffer
+        if (bytes instanceof ArrayBuffer) {
+          const blob = new Blob([bytes], { type: safeMime });
+          const url = URL.createObjectURL(blob);
+          return { url, mime: safeMime, name };
+        }
+
+        // TypedArray / Buffer-like
+        if (ArrayBuffer.isView(bytes)) {
+          const blob = new Blob([bytes], { type: safeMime });
+          const url = URL.createObjectURL(blob);
+          return { url, mime: safeMime, name };
+        }
+      } catch {
+        // fall through
+      }
+    }
+
     // unknown shape
     return { url: "", mime, name };
   };
 
-  const openViewerForFile = (docName: string, file: any) => {
+  const isSameOriginUrl = (u: string) => {
+    try {
+      const url = new URL(u, window.location.href);
+      return url.origin === window.location.origin;
+    } catch {
+      return u.startsWith("/");
+    }
+  };
+
+  const fetchToBlobUrl = async (u: string, mimeHint?: string) => {
+    const abs = new URL(u, window.location.href).toString();
+
+    const res = await fetch(abs, { credentials: "include" });
+    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+
+    const blob = await res.blob();
+    const ct = res.headers.get("content-type") || blob.type || mimeHint || "";
+
+    // Ensure the blob has a useful type (critical for PDF preview)
+    const finalBlob =
+      blob.type || !ct ? blob : blob.slice(0, blob.size, ct || blob.type);
+
+    const blobUrl = URL.createObjectURL(finalBlob);
+    return { url: blobUrl, mime: finalBlob.type || ct || mimeHint || "" };
+  };
+
+  const openViewerForFile = async (docName: string, file: any) => {
     // cleanup any old blob url we created
     if (createdBlobUrl) {
       try {
@@ -193,12 +300,44 @@ export const VendorDetailModal: React.FC<Props> = ({
     const resolved = resolveFileToUrl(file);
     if (!resolved.url) return;
 
-    // remember if it's a blob url we created
-    if (resolved.url.startsWith("blob:")) setCreatedBlobUrl(resolved.url);
+    let finalUrl = resolved.url;
+    let finalMime = resolved.mime || "";
+
+    const lowerMime = (finalMime || "").toLowerCase();
+    const maybePdf =
+      lowerMime.includes("pdf") ||
+      resolved.name.toLowerCase().endsWith(".pdf") ||
+      resolved.url.toLowerCase().includes(".pdf");
+
+    const maybeImage =
+      lowerMime.startsWith("image/") ||
+      /\.(png|jpg|jpeg|webp|gif)$/i.test(resolved.name || resolved.url);
+
+    // If it's a URL (not blob/data) and same-origin, fetch it and preview as a blob URL.
+    // This bypasses iframe-blocking headers (X-Frame-Options/attachment/CSP) from API endpoints.
+    if (
+      (maybePdf || maybeImage) &&
+      !finalUrl.startsWith("blob:") &&
+      !finalUrl.startsWith("data:") &&
+      isSameOriginUrl(finalUrl)
+    ) {
+      try {
+        const fetched = await fetchToBlobUrl(
+          finalUrl,
+          maybePdf ? "application/pdf" : finalMime
+        );
+        finalUrl = fetched.url;
+        finalMime = fetched.mime || finalMime;
+      } catch (e) {
+        console.warn("Preview fetch fallback failed, using direct URL:", e);
+      }
+    }
+
+    if (finalUrl.startsWith("blob:")) setCreatedBlobUrl(finalUrl);
 
     setViewerTitle(`${docName}${resolved.name ? ` • ${resolved.name}` : ""}`);
-    setViewerUrl(resolved.url);
-    setViewerMime(resolved.mime || "");
+    setViewerUrl(finalUrl);
+    setViewerMime(finalMime || "");
     setViewerOpen(true);
   };
 
@@ -694,9 +833,18 @@ export const VendorDetailModal: React.FC<Props> = ({
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() => {
+                          onClick={async () => {
+                            console.log(
+                              "VIEW CLICK:",
+                              doc.docName,
+                              doc.files?.[0]
+                            );
+
                             if (doc.files.length === 1) {
-                              openViewerForFile(doc.docName, doc.files[0]);
+                              await openViewerForFile(
+                                doc.docName,
+                                doc.files[0]
+                              );
                             } else {
                               setPickerDoc({
                                 docName: doc.docName,
@@ -736,7 +884,7 @@ export const VendorDetailModal: React.FC<Props> = ({
             if (!o) setPickerDoc(null);
           }}
         >
-          <DialogContent className="max-w-xl">
+          <DialogContent className="max-w-xl z-[80]">
             <DialogHeader>
               <DialogTitle>{pickerDoc?.docName || "Files"}</DialogTitle>
             </DialogHeader>
@@ -763,8 +911,11 @@ export const VendorDetailModal: React.FC<Props> = ({
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() =>
-                          openViewerForFile(pickerDoc?.docName || "Document", f)
+                        onClick={async () =>
+                          await openViewerForFile(
+                            pickerDoc?.docName || "Document",
+                            f
+                          )
                         }
                         disabled={!resolved.url}
                       >
@@ -815,7 +966,7 @@ export const VendorDetailModal: React.FC<Props> = ({
             }
           }}
         >
-          <DialogContent className="max-w-6xl h-[85vh] p-0">
+          <DialogContent className="max-w-6xl h-[85vh] p-0 z-[90]">
             <DialogHeader className="p-4 pb-2">
               <DialogTitle className="truncate">
                 {viewerTitle || "Document Viewer"}
@@ -850,6 +1001,23 @@ export const VendorDetailModal: React.FC<Props> = ({
                   }
 
                   // PDF + generic viewer (iframe). If blocked by CSP/CORS, user can still "Open" from picker.
+                  // PDF + generic viewer
+                  if (isPdf) {
+                    return (
+                      <object
+                        data={viewerUrl}
+                        type="application/pdf"
+                        className="w-full h-full rounded-lg border border-border bg-background"
+                      >
+                        <iframe
+                          title="Document Preview"
+                          src={viewerUrl}
+                          className="w-full h-full rounded-lg border border-border bg-background"
+                        />
+                      </object>
+                    );
+                  }
+
                   return (
                     <iframe
                       title="Document Preview"

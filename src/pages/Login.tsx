@@ -311,7 +311,7 @@ const Login: React.FC = () => {
               href="mailto:aarnav.singh@premierenergies.com"
               className="text-primary hover:underline"
             >
-              support@premierenergies.com
+              aarnav.singh@premierenergies.com
             </a>
           </p>
         </div>

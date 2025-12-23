@@ -70,7 +70,17 @@ const httpsOptions = {
 
 /* ========================= Constants (match frontend) ========================= */
 
-const ADMIN_EMAIL = "aarnav.singh@premierenergies.com";
+const ADMIN_EMAILS = String(
+  process.env.ADMIN_EMAILS ||
+    "aarnav.singh@premierenergies.com,nilesh.gaidhane@premierenergies.com,msudhir@premierenergies.com,sivasankar.g@premierenergies.com"
+)
+  .split(/[;,]/)
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+// Optional (only if you still want a single constant somewhere)
+const ADMIN_EMAIL = ADMIN_EMAILS[0];
+
 const DUE_DILIGENCE_EMAIL = "duediligence@premierenergies.com";
 
 const DEFAULT_DOCUMENTS = [
@@ -438,7 +448,7 @@ function normalizeEmail(email) {
 }
 
 function isAdminEmail(email) {
-  return normalizeEmail(email) === normalizeEmail(ADMIN_EMAIL);
+  return ADMIN_EMAILS.includes(normalizeEmail(email));
 }
 
 function isDueDiligenceEmail(email) {
@@ -704,7 +714,6 @@ app.use(cookieParser());
 // Body limits: vendor JSON can be large due to base64 docs
 app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ extended: true, limit: "200mb" }));
-
 
 // CORS (for dev or separated frontend)
 const allowedOrigins = String(process.env.FRONTEND_ORIGINS || "")
@@ -1013,7 +1022,6 @@ app.post("/api/vendor/submit", requireAuth, async (req, res) => {
     vendor.completionPercentage = 100;
     vendor.submitted = true;
     vendor.submittedAt = new Date().toISOString();
-
 
     const companyName = String(
       (vendor.companyDetails && vendor.companyDetails.companyName) || ""
