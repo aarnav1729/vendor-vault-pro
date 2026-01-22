@@ -103,7 +103,7 @@ const JWT_SECRET = String(
 const COOKIE_SECURE =
   String(process.env.COOKIE_SECURE || "true").toLowerCase() === "true";
 
-const APP_PORT = Number(process.env.PORT || 3001);
+const APP_PORT = Number(process.env.PORT || 26443);
 const APP_HOST = String(process.env.HOST || "0.0.0.0");
 
 /* ========================= Microsoft Graph (OTP Email) ========================= */
@@ -262,7 +262,7 @@ function mustGetEnv(name, fallback = "") {
 
 const dbConfig = {
   user: process.env.DB_USER || "PEL_DB",
-  password: process.env.DB_PASSWORD || "Pel@0184",
+  password: process.env.DB_PASSWORD || "aarnavsingh",
   server: process.env.DB_SERVER || "10.0.50.17",
   port: Number(process.env.DB_PORT || 1433),
   database: process.env.DB_NAME || "vendors",
