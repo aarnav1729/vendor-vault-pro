@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -7,7 +7,9 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -15,1022 +17,801 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Slider } from "@/components/ui/slider";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useToast } from "@/hooks/use-toast";
 import {
   VendorFormData,
   VendorClassification,
-  ScoringMatrix,
   VendorType,
-  OpexSubType,
-  CapexSubType,
   CapexBand,
   CAPEX_BANDS,
+  GradingSectionType,
+  SECTION_LABELS,
+  SECTION_RESPONSIBILITY,
+  RATING_LABELS,
+  getParametersForSection,
+  GradingParameter,
+  GradeCategory,
+  GRADE_THRESHOLDS,
+  ReviewerAssignment,
+  VendorRating,
+  VendorGrade,
+  getGradeForScore,
 } from "@/types/vendor";
 import {
+  getVendorById,
+  getClassification,
+  saveClassification,
+  getReviewerAssignments,
+  assignReviewer,
+  removeReviewerAssignment,
+  getVendorAllRatings,
+  getVendorGrade,
+  computeVendorGrade,
+  overrideVendorGrade,
+} from "@/lib/db";
+import {
   Building2,
+  UserPlus,
+  Trash2,
+  ClipboardCheck,
+  RefreshCw,
+  Shield,
+  HardHat,
+  ShoppingCart,
   TrendingUp,
-  Landmark,
-  FileCheck,
-  Users,
-  FolderOpen,
-  Save,
-  Mail,
-  FileText,
-  Eye,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  Star,
 } from "lucide-react";
 
-interface Props {
-  vendor: VendorFormData;
-  classification?: VendorClassification;
-  scoringMatrix: ScoringMatrix | null;
-  onClose: () => void;
-  onSaveClassification: (classification: VendorClassification) => Promise<void>;
+interface VendorDetailModalProps {
+  vendorId: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onUpdate?: () => void;
 }
 
-const OPEX_SUBTYPES = [
-  { value: "raw_material", label: "Raw Material" },
-  { value: "consumables", label: "Consumables" },
-  { value: "service", label: "Service" },
-];
+const GRADE_COLORS: Record<string, { text: string; bg: string }> = {
+  A: { text: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200" },
+  B: { text: "text-blue-700", bg: "bg-blue-50 border-blue-200" },
+  C: { text: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
+  D: { text: "text-red-700", bg: "bg-red-50 border-red-200" },
+};
 
-const CAPEX_SUBTYPES = [
-  { value: "civil", label: "Civil Vendors" },
-  { value: "plant_machinery", label: "Plant & Machinery" },
-  { value: "utilities", label: "Utilities" },
-  { value: "service", label: "Service" },
-];
+const SECTION_ICONS: Record<GradingSectionType, React.ElementType> = {
+  site: HardHat,
+  procurement: ShoppingCart,
+  financial: TrendingUp,
+};
 
-export const VendorDetailModal: React.FC<Props> = ({
-  vendor,
-  classification: initialClassification,
-  scoringMatrix,
-  onClose,
-  onSaveClassification,
+const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
+  vendorId,
+  open,
+  onOpenChange,
+  onUpdate,
 }) => {
-  const [localClassification, setLocalClassification] =
-    useState<VendorClassification>(() => ({
-      vendorId: vendor.id!,
-      vendorType: initialClassification?.vendorType || null,
-      opexSubType: initialClassification?.opexSubType || null,
-      capexSubType: initialClassification?.capexSubType || null,
-      capexBand: initialClassification?.capexBand || null,
-      scores: initialClassification?.scores || {
-        companyDetails: 0,
-        financialDetails: 0,
-        bankDetails: 0,
-        references: 0,
-        documents: 0,
-      },
-      totalScore: initialClassification?.totalScore || 0,
-      notes: initialClassification?.notes || "",
-      dueDiligenceSent: initialClassification?.dueDiligenceSent || false,
-      infoRequestSent: initialClassification?.infoRequestSent || false,
-    }));
+  const [vendor, setVendor] = useState<VendorFormData | null>(null);
+  const [classification, setClassification] =
+    useState<VendorClassification | null>(null);
+  const [assignments, setAssignments] = useState<ReviewerAssignment[]>([]);
+  const [ratings, setRatings] = useState<VendorRating[]>([]);
+  const [grade, setGrade] = useState<VendorGrade | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("details");
 
-  const [saving, setSaving] = useState(false);
+  // Reviewer assignment form states
+  const [newReviewerEmails, setNewReviewerEmails] = useState<
+    Record<GradingSectionType, string>
+  >({ site: "", procurement: "", financial: "" });
+  const [assigning, setAssigning] = useState<string | null>(null);
 
-  const [filePickerOpen, setFilePickerOpen] = useState(false);
-  const [pickerDoc, setPickerDoc] = useState<{
-    docName: string;
-    files: any[];
-  } | null>(null);
+  // Override grade
+  const [overrideGrade, setOverrideGrade] = useState<string>("none");
+  const [overriding, setOverriding] = useState(false);
 
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerTitle, setViewerTitle] = useState<string>("");
-  const [viewerUrl, setViewerUrl] = useState<string>("");
-  const [viewerMime, setViewerMime] = useState<string>("");
+  const { toast } = useToast();
 
-  // track blob URLs we create so we can revoke them
-  const [createdBlobUrl, setCreatedBlobUrl] = useState<string>("");
-
-  const guessMimeFromName = (name?: string) => {
-    const n = (name || "").toLowerCase();
-    if (n.endsWith(".pdf")) return "application/pdf";
-    if (n.endsWith(".png")) return "image/png";
-    if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
-    if (n.endsWith(".webp")) return "image/webp";
-    if (n.endsWith(".gif")) return "image/gif";
-    return "";
-  };
-
-  const resolveFileToUrl = (
-    file: any
-  ): { url: string; mime: string; name: string } => {
-    // Case 1: string (url or dataUrl)
-    if (typeof file === "string") {
-      const s = file.trim();
-      if (s.startsWith("data:")) {
-        const mime = s.slice(5, s.indexOf(";")) || "";
-        return { url: s, mime, name: "Document" };
-      }
-      return {
-        url: s,
-        mime: guessMimeFromName(s),
-        name: s.split("/").pop() || "Document",
-      };
-    }
-
-    // Case 2: File/Blob
-    if (file instanceof Blob) {
-      const url = URL.createObjectURL(file);
-      return {
-        url,
-        mime: (file as any).type || "",
-        name: (file as any).name || "Document",
-      };
-    }
-
-    // Case 3: object shapes from DB/IndexedDB
-    const name =
-      file?.name ||
-      file?.fileName ||
-      file?.filename ||
-      file?.originalName ||
-      "Document";
-
-    const mime =
-      file?.type || file?.mimeType || file?.mime || guessMimeFromName(name);
-
-    // Common fields people store
-    const directUrl =
-      file?.url || file?.downloadUrl || file?.publicUrl || file?.path;
-    if (directUrl && typeof directUrl === "string") {
-      return { url: directUrl, mime, name };
-    }
-
-    // data URL stored under various keys
-    const dataUrl =
-      (typeof file?.dataUrl === "string" && file.dataUrl) ||
-      (typeof file?.dataURI === "string" && file.dataURI) ||
-      (typeof file?.data === "string" && file.data.startsWith("data:")
-        ? file.data
-        : "");
-
-    if (dataUrl) {
-      const inferred = dataUrl.startsWith("data:")
-        ? dataUrl.slice(5, dataUrl.indexOf(";")) || ""
-        : mime;
-      return { url: dataUrl, mime: inferred || mime, name };
-    }
-
-    // base64 stored separately
-    const base64 = file?.base64 || file?.contentBase64;
-    if (base64 && typeof base64 === "string") {
-      const safeMime = mime || "application/octet-stream";
-      return { url: `data:${safeMime};base64,${base64}`, mime: safeMime, name };
-    }
-
-    // bytes stored as ArrayBuffer / Uint8Array / Buffer-like
-    const bytes =
-      file?.bytes ||
-      file?.data ||
-      file?.buffer ||
-      file?.arrayBuffer ||
-      file?.content;
-
-    // Handle Node Buffer JSON shape: { type: "Buffer", data: number[] }
-    const bufJson =
-      file?.type === "Buffer" && Array.isArray(file?.data)
-        ? file
-        : bytes?.type === "Buffer" && Array.isArray(bytes?.data)
-        ? bytes
-        : null;
-
-    if (bufJson) {
-      try {
-        const safeMime = mime || "application/octet-stream";
-        const u8 = new Uint8Array(bufJson.data);
-        const blob = new Blob([u8], { type: safeMime });
-        const url = URL.createObjectURL(blob);
-        return { url, mime: safeMime, name };
-      } catch {
-        // fall through
-      }
-    }
-
-    // Handle raw number[] bytes
-    if (Array.isArray(bytes) && bytes.every((n) => typeof n === "number")) {
-      try {
-        const safeMime = mime || "application/octet-stream";
-        const u8 = new Uint8Array(bytes);
-        const blob = new Blob([u8], { type: safeMime });
-        const url = URL.createObjectURL(blob);
-        return { url, mime: safeMime, name };
-      } catch {
-        // fall through
-      }
-    }
-
-    // If the stored object directly contains bytes, convert to Blob URL
-    if (bytes) {
-      try {
-        const safeMime = mime || "application/octet-stream";
-
-        // Already a Blob
-        if (bytes instanceof Blob) {
-          const url = URL.createObjectURL(bytes);
-          return {
-            url,
-            mime: (bytes as any).type || safeMime,
-            name,
-          };
-        }
-
-        // ArrayBuffer
-        if (bytes instanceof ArrayBuffer) {
-          const blob = new Blob([bytes], { type: safeMime });
-          const url = URL.createObjectURL(blob);
-          return { url, mime: safeMime, name };
-        }
-
-        // TypedArray / Buffer-like
-        if (ArrayBuffer.isView(bytes)) {
-          const blob = new Blob([bytes], { type: safeMime });
-          const url = URL.createObjectURL(blob);
-          return { url, mime: safeMime, name };
-        }
-      } catch {
-        // fall through
-      }
-    }
-
-    // unknown shape
-    return { url: "", mime, name };
-  };
-
-  const isSameOriginUrl = (u: string) => {
+  const loadData = useCallback(async () => {
+    if (!vendorId) return;
+    setLoading(true);
     try {
-      const url = new URL(u, window.location.href);
-      return url.origin === window.location.origin;
-    } catch {
-      return u.startsWith("/");
+      const [v, cl, asn, rat, gr] = await Promise.all([
+        getVendorById(vendorId).catch(() => null),
+        getClassification(vendorId).catch(() => null),
+        getReviewerAssignments(vendorId).catch(() => []),
+        getVendorAllRatings(vendorId).catch(() => []),
+        getVendorGrade(vendorId).catch(() => null),
+      ]);
+      setVendor(v || null);
+      setClassification(cl || null);
+      setAssignments(asn || []);
+      setRatings(rat || []);
+      setGrade(gr || null);
+      setOverrideGrade(gr?.adminOverrideGrade || "none");
+    } catch (e) {
+      console.error("Failed to load vendor detail data:", e);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const fetchToBlobUrl = async (u: string, mimeHint?: string) => {
-    const abs = new URL(u, window.location.href).toString();
-
-    const res = await fetch(abs, { credentials: "include" });
-    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-
-    const blob = await res.blob();
-    const ct = res.headers.get("content-type") || blob.type || mimeHint || "";
-
-    // Ensure the blob has a useful type (critical for PDF preview)
-    const finalBlob =
-      blob.type || !ct ? blob : blob.slice(0, blob.size, ct || blob.type);
-
-    const blobUrl = URL.createObjectURL(finalBlob);
-    return { url: blobUrl, mime: finalBlob.type || ct || mimeHint || "" };
-  };
-
-  const openViewerForFile = async (docName: string, file: any) => {
-    // cleanup any old blob url we created
-    if (createdBlobUrl) {
-      try {
-        URL.revokeObjectURL(createdBlobUrl);
-      } catch {}
-      setCreatedBlobUrl("");
-    }
-
-    const resolved = resolveFileToUrl(file);
-    if (!resolved.url) return;
-
-    let finalUrl = resolved.url;
-    let finalMime = resolved.mime || "";
-
-    const lowerMime = (finalMime || "").toLowerCase();
-    const maybePdf =
-      lowerMime.includes("pdf") ||
-      resolved.name.toLowerCase().endsWith(".pdf") ||
-      resolved.url.toLowerCase().includes(".pdf");
-
-    const maybeImage =
-      lowerMime.startsWith("image/") ||
-      /\.(png|jpg|jpeg|webp|gif)$/i.test(resolved.name || resolved.url);
-
-    // If it's a URL (not blob/data) and same-origin, fetch it and preview as a blob URL.
-    // This bypasses iframe-blocking headers (X-Frame-Options/attachment/CSP) from API endpoints.
-    if (
-      (maybePdf || maybeImage) &&
-      !finalUrl.startsWith("blob:") &&
-      !finalUrl.startsWith("data:") &&
-      isSameOriginUrl(finalUrl)
-    ) {
-      try {
-        const fetched = await fetchToBlobUrl(
-          finalUrl,
-          maybePdf ? "application/pdf" : finalMime
-        );
-        finalUrl = fetched.url;
-        finalMime = fetched.mime || finalMime;
-      } catch (e) {
-        console.warn("Preview fetch fallback failed, using direct URL:", e);
-      }
-    }
-
-    if (finalUrl.startsWith("blob:")) setCreatedBlobUrl(finalUrl);
-
-    setViewerTitle(`${docName}${resolved.name ? ` • ${resolved.name}` : ""}`);
-    setViewerUrl(finalUrl);
-    setViewerMime(finalMime || "");
-    setViewerOpen(true);
-  };
+  }, [vendorId]);
 
   useEffect(() => {
-    return () => {
-      if (createdBlobUrl) {
-        try {
-          URL.revokeObjectURL(createdBlobUrl);
-        } catch {}
-      }
-    };
-  }, [createdBlobUrl]);
+    if (open && vendorId) {
+      loadData();
+      setActiveTab("details");
+    }
+  }, [open, vendorId, loadData]);
 
-  useEffect(() => {
-    calculateTotalScore();
-  }, [localClassification.scores, scoringMatrix]);
+  const handleAssignReviewer = async (section: GradingSectionType) => {
+    const email = newReviewerEmails[section]?.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      toast({ title: "Invalid email", variant: "destructive" });
+      return;
+    }
+    if (!vendorId) return;
 
-  const calculateTotalScore = () => {
-    if (!scoringMatrix) return;
-
-    const { scores } = localClassification;
-    const total =
-      (scores.companyDetails * scoringMatrix.companyDetailsWeight +
-        scores.financialDetails * scoringMatrix.financialDetailsWeight +
-        scores.bankDetails * scoringMatrix.bankDetailsWeight +
-        scores.references * scoringMatrix.referencesWeight +
-        scores.documents * scoringMatrix.documentsWeight) /
-      100;
-
-    setLocalClassification((prev) => ({
-      ...prev,
-      totalScore: Math.round(total * 10) / 10,
-    }));
+    setAssigning(section);
+    try {
+      await assignReviewer(vendorId, section, email);
+      toast({
+        title: "Reviewer assigned",
+        description: `${email} → ${SECTION_LABELS[section]}`,
+      });
+      setNewReviewerEmails((prev) => ({ ...prev, [section]: "" }));
+      await loadData();
+    } catch (e: any) {
+      toast({
+        title: "Assignment failed",
+        description: String(e?.message || e),
+        variant: "destructive",
+      });
+    } finally {
+      setAssigning(null);
+    }
   };
 
-  const updateScore = (
-    category: keyof typeof localClassification.scores,
-    value: number
-  ) => {
-    setLocalClassification((prev) => ({
-      ...prev,
-      scores: { ...prev.scores, [category]: value },
-    }));
+  const handleRemoveAssignment = async (assignmentId: number) => {
+    try {
+      await removeReviewerAssignment(assignmentId);
+      toast({ title: "Assignment removed" });
+      await loadData();
+    } catch (e: any) {
+      toast({
+        title: "Remove failed",
+        description: String(e?.message || e),
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    await onSaveClassification(localClassification);
-    setSaving(false);
-    onClose();
+  const handleComputeGrade = async () => {
+    if (!vendorId) return;
+    try {
+      await computeVendorGrade(vendorId);
+      toast({ title: "Grade recomputed" });
+      await loadData();
+      onUpdate?.();
+    } catch (e: any) {
+      toast({
+        title: "Compute failed",
+        description: String(e?.message || e),
+        variant: "destructive",
+      });
+    }
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0,
-    }).format(value);
+  const handleOverrideGrade = async () => {
+    if (!vendorId) return;
+    setOverriding(true);
+    try {
+      const g =
+        overrideGrade === "none" ? null : (overrideGrade as GradeCategory);
+      await overrideVendorGrade(vendorId, g);
+      toast({ title: g ? `Grade overridden to ${g}` : "Override removed" });
+      await loadData();
+      onUpdate?.();
+    } catch (e: any) {
+      toast({
+        title: "Override failed",
+        description: String(e?.message || e),
+        variant: "destructive",
+      });
+    } finally {
+      setOverriding(false);
+    }
   };
+
+  // Helper: get ratings for a section as Record<paramKey, number>
+  const ratingsForSection = (
+    section: GradingSectionType
+  ): Record<string, { rating: number; ratedBy: string }> => {
+    const result: Record<string, { rating: number; ratedBy: string }> = {};
+    ratings
+      .filter((r) => r.sectionType === section)
+      .forEach((r) => {
+        result[r.parameterKey] = { rating: r.rating, ratedBy: r.ratedBy };
+      });
+    return result;
+  };
+
+  const assignmentsForSection = (section: GradingSectionType) =>
+    assignments.filter((a) => a.sectionType === section);
+
+  const companyName = vendor?.companyDetails?.companyName || "Unnamed Vendor";
+
+  if (!vendorId) return null;
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] p-0">
-        <DialogHeader className="p-6 pb-0">
-          <DialogTitle className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold">
-                {vendor.companyDetails.companyName || "Unnamed Vendor"}
-              </h2>
-              <p className="text-sm text-muted-foreground font-normal">
-                {vendor.email}
-              </p>
-            </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-primary" />
+            {loading ? "Loading..." : companyName}
           </DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[calc(90vh-100px)]">
-          <div className="p-6">
-            <Tabs defaultValue="details">
-              <TabsList className="mb-4">
-                <TabsTrigger value="details">Details</TabsTrigger>
-                <TabsTrigger value="classification">Classification</TabsTrigger>
-                <TabsTrigger value="scoring">Scoring</TabsTrigger>
-                <TabsTrigger value="documents">Documents</TabsTrigger>
-              </TabsList>
-
-              {/* Details Tab */}
-              <TabsContent value="details" className="space-y-6">
-                {/* Company Info */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h3 className="font-semibold flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-primary" />
-                      Company Information
-                    </h3>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">CIN:</span>
-                        <span>{vendor.companyDetails.cinNumber || "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">GST:</span>
-                        <span>{vendor.companyDetails.gstNumber || "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">PAN:</span>
-                        <span>{vendor.companyDetails.panNumber || "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          Established:
-                        </span>
-                        <span>
-                          {vendor.companyDetails.yearOfEstablishment || "-"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Origin:</span>
-                        <span>
-                          {vendor.companyDetails.companyOrigin || "-"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">MSME:</span>
-                        <span>
-                          {vendor.companyDetails.isMSME ? "Yes" : "No"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <h3 className="font-semibold flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-primary" />
-                      Financial Summary
-                    </h3>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          FY 2022-23:
-                        </span>
-                        <span>
-                          {formatCurrency(
-                            vendor.financialDetails.annualTurnover.fy2022_23
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          FY 2023-24:
-                        </span>
-                        <span>
-                          {formatCurrency(
-                            vendor.financialDetails.annualTurnover.fy2023_24
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          FY 2024-25:
-                        </span>
-                        <span>
-                          {formatCurrency(
-                            vendor.financialDetails.annualTurnover.fy2024_25
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          FY 2025-26:
-                        </span>
-                        <span>
-                          {formatCurrency(
-                            vendor.financialDetails.annualTurnover.fy2025_26
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Bank Details */}
-                <div className="space-y-4">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Landmark className="w-4 h-4 text-primary" />
-                    Bank Details
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground block">Bank:</span>
-                      <span>{vendor.bankDetails.bankName || "-"}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground block">
-                        Branch:
-                      </span>
-                      <span>{vendor.bankDetails.branch || "-"}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground block">
-                        Account:
-                      </span>
-                      <span>{vendor.bankDetails.accountNumber || "-"}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground block">IFSC:</span>
-                      <span>{vendor.bankDetails.ifscCode || "-"}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* References */}
-                <div className="space-y-4">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <FileCheck className="w-4 h-4 text-primary" />
-                    References (
-                    {
-                      vendor.vendorReferences.filter((r) => r.companyName)
-                        .length
-                    }
-                    )
-                  </h3>
-                  <div className="space-y-2">
-                    {vendor.vendorReferences
-                      .filter((r) => r.companyName)
-                      .map((ref, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
-                        >
-                          <div>
-                            <p className="font-medium">{ref.companyName}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {ref.contactPersonName} • {ref.currentStatus}
-                            </p>
-                          </div>
-                          <span className="text-sm">
-                            {formatCurrency(ref.poValue)}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-
-                {/* Contacts */}
-                <div className="space-y-4">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Users className="w-4 h-4 text-primary" />
-                    Contact Persons (
-                    {vendor.contactPersons.filter((c) => c.name).length})
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {vendor.contactPersons
-                      .filter((c) => c.name)
-                      .map((contact, i) => (
-                        <div key={i} className="p-3 bg-muted/50 rounded-lg">
-                          <p className="font-medium">{contact.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {contact.designation}
-                          </p>
-                          <p className="text-sm">{contact.mailId}</p>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              </TabsContent>
-
-              {/* Classification Tab */}
-              <TabsContent value="classification" className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Vendor Type</Label>
-                      <Select
-                        value={localClassification.vendorType || ""}
-                        onValueChange={(v) =>
-                          setLocalClassification((prev) => ({
-                            ...prev,
-                            vendorType: v as VendorType,
-                            opexSubType: null,
-                            capexSubType: null,
-                          }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="capex">Capex</SelectItem>
-                          <SelectItem value="opex">Opex</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {localClassification.vendorType === "opex" && (
-                      <div className="space-y-2">
-                        <Label>Opex Sub-Type</Label>
-                        <Select
-                          value={localClassification.opexSubType || ""}
-                          onValueChange={(v) =>
-                            setLocalClassification((prev) => ({
-                              ...prev,
-                              opexSubType: v as OpexSubType,
-                            }))
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select sub-type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {OPEX_SUBTYPES.map((t) => (
-                              <SelectItem key={t.value} value={t.value}>
-                                {t.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    {localClassification.vendorType === "capex" && (
-                      <div className="space-y-2">
-                        <Label>Capex Sub-Type</Label>
-                        <Select
-                          value={localClassification.capexSubType || ""}
-                          onValueChange={(v) =>
-                            setLocalClassification((prev) => ({
-                              ...prev,
-                              capexSubType: v as CapexSubType,
-                            }))
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select sub-type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CAPEX_SUBTYPES.map((t) => (
-                              <SelectItem key={t.value} value={t.value}>
-                                {t.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Capex Band</Label>
-                      <Select
-                        value={localClassification.capexBand || ""}
-                        onValueChange={(v) =>
-                          setLocalClassification((prev) => ({
-                            ...prev,
-                            capexBand: v as CapexBand,
-                          }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select band" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CAPEX_BANDS.map((b) => (
-                            <SelectItem key={b.value!} value={b.value!}>
-                              {b.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Notes</Label>
-                      <Textarea
-                        value={localClassification.notes || ""}
-                        onChange={(e) =>
-                          setLocalClassification((prev) => ({
-                            ...prev,
-                            notes: e.target.value,
-                          }))
-                        }
-                        placeholder="Add classification notes..."
-                        rows={4}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </TabsContent>
-
-              {/* Scoring Tab */}
-              <TabsContent value="scoring" className="space-y-6">
-                <div className="bg-muted/50 rounded-lg p-4 mb-6">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold">Total Score</span>
-                    <span className="text-3xl font-bold text-primary">
-                      {localClassification.totalScore}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  {[
-                    {
-                      key: "companyDetails",
-                      label: "Company Details",
-                      weight: scoringMatrix?.companyDetailsWeight,
-                    },
-                    {
-                      key: "financialDetails",
-                      label: "Financial Details",
-                      weight: scoringMatrix?.financialDetailsWeight,
-                    },
-                    {
-                      key: "bankDetails",
-                      label: "Bank Details",
-                      weight: scoringMatrix?.bankDetailsWeight,
-                    },
-                    {
-                      key: "references",
-                      label: "References",
-                      weight: scoringMatrix?.referencesWeight,
-                    },
-                    {
-                      key: "documents",
-                      label: "Documents",
-                      weight: scoringMatrix?.documentsWeight,
-                    },
-                  ].map(({ key, label, weight }) => (
-                    <div key={key} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label>
-                          {label} (Weight: {weight}%)
-                        </Label>
-                        <span className="font-medium">
-                          {
-                            localClassification.scores[
-                              key as keyof typeof localClassification.scores
-                            ]
-                          }
-                          /10
-                        </span>
-                      </div>
-                      <Slider
-                        value={[
-                          localClassification.scores[
-                            key as keyof typeof localClassification.scores
-                          ],
-                        ]}
-                        onValueChange={([v]) =>
-                          updateScore(
-                            key as keyof typeof localClassification.scores,
-                            v
-                          )
-                        }
-                        max={10}
-                        step={0.5}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </TabsContent>
-
-              {/* Documents Tab */}
-              <TabsContent value="documents" className="space-y-4">
-                {vendor.documents.map((doc, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-center justify-between p-3 rounded-lg ${
-                      doc.attached ? "bg-success/10" : "bg-muted/50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <FileText
-                        className={`w-4 h-4 ${
-                          doc.attached
-                            ? "text-success"
-                            : "text-muted-foreground"
-                        }`}
-                      />
-                      <span>{doc.docName}</span>
-                    </div>
-                    {doc.attached && doc.files.length > 0 && (
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">
-                          {doc.files.length} file(s)
-                        </Badge>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={async () => {
-                            console.log(
-                              "VIEW CLICK:",
-                              doc.docName,
-                              doc.files?.[0]
-                            );
-
-                            if (doc.files.length === 1) {
-                              await openViewerForFile(
-                                doc.docName,
-                                doc.files[0]
-                              );
-                            } else {
-                              setPickerDoc({
-                                docName: doc.docName,
-                                files: doc.files,
-                              });
-                              setFilePickerOpen(true);
-                            }
-                          }}
-                          title="View document"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </TabsContent>
-            </Tabs>
-
-            {/* Actions */}
-            <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-border">
-              <Button variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button onClick={handleSave} disabled={saving}>
-                <Save className="w-4 h-4 mr-2" />
-                {saving ? "Saving..." : "Save Classification"}
-              </Button>
-            </div>
+        {loading ? (
+          <div className="py-12 text-center text-muted-foreground animate-pulse">
+            Loading vendor data...
           </div>
-        </ScrollArea>
-        {/* File Picker (when multiple files exist under a document) */}
-        <Dialog
-          open={filePickerOpen}
-          onOpenChange={(o) => {
-            setFilePickerOpen(o);
-            if (!o) setPickerDoc(null);
-          }}
-        >
-          <DialogContent className="max-w-xl z-[80]">
-            <DialogHeader>
-              <DialogTitle>{pickerDoc?.docName || "Files"}</DialogTitle>
-            </DialogHeader>
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="reviewers">Reviewers</TabsTrigger>
+              <TabsTrigger value="ratings">Ratings</TabsTrigger>
+              <TabsTrigger value="grade">Grade</TabsTrigger>
+            </TabsList>
 
-            <div className="space-y-2">
-              {(pickerDoc?.files || []).map((f, idx) => {
-                const resolved = resolveFileToUrl(f);
+            {/* ===== DETAILS TAB ===== */}
+            <TabsContent value="details" className="space-y-4 mt-4">
+              {vendor && (
+                <>
+                  {/* Company Details */}
+                  <div className="bg-muted/30 rounded-lg p-4 space-y-2">
+                    <h3 className="font-semibold text-sm">Company Details</h3>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Email:</span>{" "}
+                        {vendor.email}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">CIN:</span>{" "}
+                        {vendor.companyDetails?.cinNumber || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">GST:</span>{" "}
+                        {vendor.companyDetails?.gstNumber || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">PAN:</span>{" "}
+                        {vendor.companyDetails?.panNumber || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Year:</span>{" "}
+                        {vendor.companyDetails?.yearOfEstablishment || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Origin:</span>{" "}
+                        {vendor.companyDetails?.companyOrigin || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Org Type:</span>{" "}
+                        {vendor.companyDetails?.typeOfOrganisation || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">MSME:</span>{" "}
+                        {vendor.companyDetails?.isMSME ? "Yes" : "No"}
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Address:</span>{" "}
+                        {[
+                          vendor.companyDetails?.registeredAddress?.line1,
+                          vendor.companyDetails?.registeredAddress?.line2,
+                          vendor.companyDetails?.registeredAddress?.district,
+                          vendor.companyDetails?.registeredAddress?.state,
+                          vendor.companyDetails?.registeredAddress?.pinCode,
+                        ]
+                          .filter(Boolean)
+                          .join(", ") || "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Classification */}
+                  <div className="bg-muted/30 rounded-lg p-4 space-y-2">
+                    <h3 className="font-semibold text-sm">Classification</h3>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Type:</span>{" "}
+                        {classification?.vendorType || "Not classified"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Band:</span>{" "}
+                        {classification?.capexBand
+                          ? CAPEX_BANDS.find(
+                              (b) => b.value === classification.capexBand
+                            )?.label || classification.capexBand
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Completion */}
+                  <div className="bg-muted/30 rounded-lg p-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        Form Completion
+                      </span>
+                      <span className="font-medium">
+                        {vendor.completionPercentage}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2 mt-2">
+                      <div
+                        className="bg-primary h-2 rounded-full transition-all"
+                        style={{ width: `${vendor.completionPercentage}%` }}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+            </TabsContent>
+
+            {/* ===== REVIEWERS TAB ===== */}
+            <TabsContent value="reviewers" className="space-y-6 mt-4">
+              {(
+                ["site", "procurement", "financial"] as GradingSectionType[]
+              ).map((section) => {
+                const SIcon = SECTION_ICONS[section];
+                const sectionAssignments = assignmentsForSection(section);
+                const sectionRatings = ratingsForSection(section);
+                const params = getParametersForSection(section);
+                const hasRatings =
+                  Object.keys(sectionRatings).length === params.length;
+
                 return (
                   <div
-                    key={idx}
-                    className="flex items-center justify-between rounded-lg border border-border p-3"
+                    key={section}
+                    className="border border-border rounded-xl overflow-hidden"
                   >
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">
-                        {resolved.name || `File ${idx + 1}`}
+                    <div className="bg-muted/50 px-4 py-3 flex items-center gap-3">
+                      <SIcon className="w-5 h-5 text-primary" />
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-sm">
+                          {SECTION_LABELS[section]}
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          Responsibility: {SECTION_RESPONSIBILITY[section]}
+                        </p>
                       </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        {resolved.mime || "Unknown type"}
-                      </div>
+                      {hasRatings ? (
+                        <Badge variant="default" className="bg-emerald-500">
+                          <CheckCircle2 className="w-3 h-3 mr-1" />
+                          Rated
+                        </Badge>
+                      ) : sectionAssignments.length > 0 ? (
+                        <Badge variant="secondary">
+                          <Clock className="w-3 h-3 mr-1" />
+                          Assigned
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="text-muted-foreground"
+                        >
+                          Not assigned
+                        </Badge>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={async () =>
-                          await openViewerForFile(
-                            pickerDoc?.docName || "Document",
-                            f
-                          )
-                        }
-                        disabled={!resolved.url}
-                      >
-                        <Eye className="w-4 h-4 mr-2" />
-                        View
-                      </Button>
+                    <div className="p-4 space-y-3">
+                      {/* Current assignments */}
+                      {sectionAssignments.length > 0 && (
+                        <div className="space-y-2">
+                          {sectionAssignments.map((a) => (
+                            <div
+                              key={a.id}
+                              className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2"
+                            >
+                              <div className="text-sm">
+                                <span className="font-medium">
+                                  {a.reviewerEmail}
+                                </span>
+                                <span className="text-xs text-muted-foreground ml-2">
+                                  assigned{" "}
+                                  {new Date(a.assignedAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRemoveAssignment(a.id!)}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
-                      {resolved.url && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            window.open(
-                              resolved.url,
-                              "_blank",
-                              "noopener,noreferrer"
-                            )
+                      {/* Add new reviewer */}
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder={`Assign reviewer email for ${SECTION_LABELS[section]}...`}
+                          value={newReviewerEmails[section]}
+                          onChange={(e) =>
+                            setNewReviewerEmails((prev) => ({
+                              ...prev,
+                              [section]: e.target.value,
+                            }))
                           }
+                          className="flex-1 text-sm"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter")
+                              handleAssignReviewer(section);
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => handleAssignReviewer(section)}
+                          disabled={assigning === section}
                         >
-                          Open
+                          <UserPlus className="w-4 h-4 mr-1" />
+                          {assigning === section ? "..." : "Assign"}
                         </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </TabsContent>
+
+            {/* ===== RATINGS TAB ===== */}
+            <TabsContent value="ratings" className="space-y-6 mt-4">
+              {(
+                ["site", "procurement", "financial"] as GradingSectionType[]
+              ).map((section) => {
+                const SIcon = SECTION_ICONS[section];
+                const params = getParametersForSection(section);
+                const sectionRatings = ratingsForSection(section);
+                const hasAny = Object.keys(sectionRatings).length > 0;
+
+                // Compute section score
+                const ratingValues: Record<string, number> = {};
+                Object.entries(sectionRatings).forEach(([k, v]) => {
+                  ratingValues[k] = v.rating;
+                });
+                let sectionScore = 0;
+                params.forEach((p) => {
+                  const r = ratingValues[p.key] || 0;
+                  sectionScore += (r / 5) * p.weight;
+                });
+                sectionScore = Math.round(sectionScore * 100) / 100;
+                const maxScore = params.reduce((s, p) => s + p.weight, 0);
+
+                return (
+                  <div
+                    key={section}
+                    className="border border-border rounded-xl overflow-hidden"
+                  >
+                    <div className="bg-muted/50 px-4 py-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <SIcon className="w-5 h-5 text-primary" />
+                        <h3 className="font-semibold text-sm">
+                          {SECTION_LABELS[section]}
+                        </h3>
+                      </div>
+                      {hasAny && (
+                        <div className="text-right">
+                          <span className="text-lg font-bold text-primary">
+                            {sectionScore.toFixed(1)}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            /{maxScore}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-4">
+                      {!hasAny ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          No ratings submitted yet for this section.
+                        </p>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-border">
+                              <th className="text-left py-2 px-2 font-medium">
+                                #
+                              </th>
+                              <th className="text-left py-2 px-2 font-medium">
+                                Parameter
+                              </th>
+                              <th className="text-center py-2 px-2 font-medium">
+                                Weight
+                              </th>
+                              <th className="text-center py-2 px-2 font-medium">
+                                Rating
+                              </th>
+                              <th className="text-center py-2 px-2 font-medium">
+                                Score
+                              </th>
+                              <th className="text-left py-2 px-2 font-medium">
+                                Rated By
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {params.map((param) => {
+                              const r = sectionRatings[param.key];
+                              const rating = r?.rating || 0;
+                              const score =
+                                rating > 0
+                                  ? ((rating / 5) * param.weight).toFixed(2)
+                                  : "—";
+
+                              return (
+                                <tr
+                                  key={param.key}
+                                  className="border-b border-border/50"
+                                >
+                                  <td className="py-2 px-2 text-muted-foreground">
+                                    {param.srNo}
+                                  </td>
+                                  <td className="py-2 px-2">
+                                    <p className="font-medium">{param.name}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {param.description}
+                                    </p>
+                                  </td>
+                                  <td className="py-2 px-2 text-center">
+                                    {param.weight}%
+                                  </td>
+                                  <td className="py-2 px-2 text-center">
+                                    {rating > 0 ? (
+                                      <div>
+                                        <span className="font-bold">
+                                          {rating}
+                                        </span>
+                                        <span className="text-muted-foreground">
+                                          /5
+                                        </span>
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {RATING_LABELS[rating]}
+                                        </p>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground">
+                                        —
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-2 text-center font-mono">
+                                    {score}
+                                  </td>
+                                  <td className="py-2 px-2 text-xs text-muted-foreground">
+                                    {r?.ratedBy || "—"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       )}
                     </div>
                   </div>
                 );
               })}
-            </div>
-          </DialogContent>
-        </Dialog>
+            </TabsContent>
 
-        {/* Inline Viewer */}
-        <Dialog
-          open={viewerOpen}
-          onOpenChange={(o) => {
-            setViewerOpen(o);
-            if (!o) {
-              // cleanup blob url if we created one
-              if (createdBlobUrl) {
-                try {
-                  URL.revokeObjectURL(createdBlobUrl);
-                } catch {}
-                setCreatedBlobUrl("");
-              }
-              setViewerUrl("");
-              setViewerMime("");
-              setViewerTitle("");
-            }
-          }}
-        >
-          <DialogContent className="max-w-6xl h-[85vh] p-0 z-[90]">
-            <DialogHeader className="p-4 pb-2">
-              <DialogTitle className="truncate">
-                {viewerTitle || "Document Viewer"}
-              </DialogTitle>
-            </DialogHeader>
+            {/* ===== GRADE TAB ===== */}
+            <TabsContent value="grade" className="space-y-6 mt-4">
+              {/* Current Grade Display */}
+              {grade ? (
+                <div className="space-y-4">
+                  {/* Score breakdown */}
+                  <div className="bg-muted/30 rounded-xl p-6">
+                    <div className="grid grid-cols-4 gap-4 text-center">
+                      <div>
+                        <HardHat className="w-5 h-5 text-primary mx-auto mb-1" />
+                        <p className="text-2xl font-bold">
+                          {grade.siteScore.toFixed(1)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Site (45%)
+                        </p>
+                      </div>
+                      <div>
+                        <ShoppingCart className="w-5 h-5 text-primary mx-auto mb-1" />
+                        <p className="text-2xl font-bold">
+                          {grade.procurementScore.toFixed(1)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Procurement (30%)
+                        </p>
+                      </div>
+                      <div>
+                        <TrendingUp className="w-5 h-5 text-primary mx-auto mb-1" />
+                        <p className="text-2xl font-bold">
+                          {grade.financialScore.toFixed(1)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Financial (25%)
+                        </p>
+                      </div>
+                      <div className="border-l border-border">
+                        <Star className="w-5 h-5 text-warning mx-auto mb-1" />
+                        <p className="text-3xl font-black text-primary">
+                          {grade.totalScore.toFixed(1)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Total /100
+                        </p>
+                      </div>
+                    </div>
+                  </div>
 
-            <div className="px-4 pb-4 h-[calc(85vh-56px)]">
-              {!viewerUrl ? (
-                <div className="h-full flex items-center justify-center text-muted-foreground">
-                  No file to preview.
+                  {/* Grade result */}
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Computed Grade
+                      </p>
+                      {grade.computedGrade ? (
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center justify-center w-12 h-12 rounded-full text-xl font-black border ${
+                              GRADE_COLORS[grade.computedGrade]?.bg || ""
+                            } ${GRADE_COLORS[grade.computedGrade]?.text || ""}`}
+                          >
+                            {grade.computedGrade}
+                          </span>
+                          <div>
+                            <p
+                              className={`font-semibold ${
+                                GRADE_COLORS[grade.computedGrade]?.text || ""
+                              }`}
+                            >
+                              {getGradeForScore(grade.totalScore).category}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {getGradeForScore(grade.totalScore).financialGate}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          Not computed
+                        </span>
+                      )}
+                    </div>
+
+                    {grade.adminOverrideGrade && (
+                      <div className="flex-1">
+                        <p className="text-sm text-muted-foreground mb-1">
+                          Admin Override
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center justify-center w-12 h-12 rounded-full text-xl font-black border ${
+                              GRADE_COLORS[grade.adminOverrideGrade]?.bg || ""
+                            } ${
+                              GRADE_COLORS[grade.adminOverrideGrade]?.text || ""
+                            }`}
+                          >
+                            {grade.adminOverrideGrade}
+                          </span>
+                          <div>
+                            <p className="text-xs text-muted-foreground">
+                              by {grade.overriddenBy}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {grade.overriddenAt
+                                ? new Date(
+                                    grade.overriddenAt
+                                  ).toLocaleDateString()
+                                : ""}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Final Grade
+                      </p>
+                      {grade.finalGrade ? (
+                        <span
+                          className={`inline-flex items-center justify-center w-12 h-12 rounded-full text-xl font-black border ${
+                            GRADE_COLORS[grade.finalGrade]?.bg || ""
+                          } ${GRADE_COLORS[grade.finalGrade]?.text || ""}`}
+                        >
+                          {grade.finalGrade}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="border-t border-border pt-4 space-y-4">
+                    {/* Recompute */}
+                    <Button
+                      variant="outline"
+                      onClick={handleComputeGrade}
+                      className="w-full"
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Recompute Grade from Ratings
+                    </Button>
+
+                    {/* Override */}
+                    <div className="flex items-center gap-3">
+                      <Label className="text-sm whitespace-nowrap">
+                        Override Grade:
+                      </Label>
+                      <Select
+                        value={overrideGrade}
+                        onValueChange={setOverrideGrade}
+                      >
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder="Select grade" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            No Override (use computed)
+                          </SelectItem>
+                          <SelectItem value="A">
+                            A — Strategic Vendor
+                          </SelectItem>
+                          <SelectItem value="B">B — Approved Vendor</SelectItem>
+                          <SelectItem value="C">
+                            C — Conditional Vendor
+                          </SelectItem>
+                          <SelectItem value="D">
+                            D — High-Risk Vendor
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={handleOverrideGrade}
+                        disabled={overriding}
+                        variant={
+                          overrideGrade === "none" ? "outline" : "default"
+                        }
+                      >
+                        <Shield className="w-4 h-4 mr-1" />
+                        {overriding ? "..." : "Apply"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               ) : (
-                (() => {
-                  const mime = (viewerMime || "").toLowerCase();
-                  const isPdf =
-                    mime.includes("pdf") ||
-                    viewerUrl.toLowerCase().includes(".pdf");
-                  const isImage =
-                    mime.startsWith("image/") ||
-                    /\.(png|jpg|jpeg|webp|gif)$/i.test(viewerUrl);
-
-                  if (isImage) {
-                    return (
-                      <div className="h-full w-full overflow-auto rounded-lg border border-border bg-black/5">
-                        <img
-                          src={viewerUrl}
-                          alt={viewerTitle}
-                          className="max-w-full mx-auto"
-                        />
-                      </div>
-                    );
-                  }
-
-                  // PDF + generic viewer (iframe). If blocked by CSP/CORS, user can still "Open" from picker.
-                  // PDF + generic viewer
-                  if (isPdf) {
-                    return (
-                      <object
-                        data={viewerUrl}
-                        type="application/pdf"
-                        className="w-full h-full rounded-lg border border-border bg-background"
-                      >
-                        <iframe
-                          title="Document Preview"
-                          src={viewerUrl}
-                          className="w-full h-full rounded-lg border border-border bg-background"
-                        />
-                      </object>
-                    );
-                  }
-
-                  return (
-                    <iframe
-                      title="Document Preview"
-                      src={viewerUrl}
-                      className="w-full h-full rounded-lg border border-border bg-background"
-                    />
-                  );
-                })()
+                <div className="text-center py-12 space-y-4">
+                  <AlertTriangle className="w-12 h-12 text-muted-foreground mx-auto" />
+                  <p className="text-muted-foreground">
+                    No grade computed yet. Assign reviewers and wait for
+                    ratings, or compute manually.
+                  </p>
+                  <Button onClick={handleComputeGrade}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Compute Grade Now
+                  </Button>
+                </div>
               )}
-            </div>
-          </DialogContent>
-        </Dialog>
+            </TabsContent>
+          </Tabs>
+        )}
       </DialogContent>
     </Dialog>
   );
 };
+
+export default VendorDetailModal;

@@ -13,6 +13,7 @@ interface AuthContextType {
   setUser: (user: User | null) => void;
   isAdmin: boolean;
   isDueDiligence: boolean;
+  isReviewer: boolean;
   logout: () => void;
   loading: boolean;
 }
@@ -60,9 +61,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         method: "POST",
         credentials: "include",
       });
-    } catch {
-      // ignore
-    }
+    } catch { }
     setUser(null);
   };
 
@@ -73,19 +72,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
   const isAdmin =
     !!(user as any)?.isAdmin ||
-    adminSet.has(
-      String(user?.email || "")
-        .trim()
-        .toLowerCase()
-    );
+    adminSet.has(String(user?.email || "").trim().toLowerCase());
 
   const isDueDiligence =
     !!(user as any)?.isDueDiligence ||
     user?.email?.toLowerCase() === DUE_DILIGENCE_EMAIL.toLowerCase();
 
+  const isReviewer = !!(user as any)?.isReviewer;
+
   return (
     <AuthContext.Provider
-      value={{ user, setUser, isAdmin, isDueDiligence, logout, loading }}
+      value={{ user, setUser, isAdmin, isDueDiligence, isReviewer, logout, loading }}
     >
       {children}
     </AuthContext.Provider>

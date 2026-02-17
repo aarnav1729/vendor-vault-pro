@@ -136,6 +136,374 @@ export type CapexBand =
   | "more_than_100Cr"
   | null;
 
+/* ========================= NEW GRADING SYSTEM ========================= */
+
+/** Rating value: 1–5 */
+export type RatingValue = 1 | 2 | 3 | 4 | 5;
+
+export const RATING_LABELS: Record<number, string> = {
+  1: "Very Poor / Unacceptable",
+  2: "Poor",
+  3: "Average / Acceptable",
+  4: "Good",
+  5: "Excellent / Best in class",
+};
+
+/** Section types for reviewer assignment */
+export type GradingSectionType = "site" | "procurement" | "financial";
+
+export const SECTION_LABELS: Record<GradingSectionType, string> = {
+  site: "Site Performance",
+  procurement: "Procurement Performance",
+  financial: "Financial Performance",
+};
+
+export const SECTION_RESPONSIBILITY: Record<GradingSectionType, string> = {
+  site: "Site Team",
+  procurement: "Concerned Procurement Team Member",
+  financial: "Finance Team / CAPEX Team",
+};
+
+export const SECTION_WEIGHT: Record<GradingSectionType, number> = {
+  site: 45,
+  procurement: 30,
+  financial: 25,
+};
+
+/** A single grading parameter definition */
+export interface GradingParameter {
+  key: string;
+  srNo: number;
+  name: string;
+  description: string;
+  weight: number; // absolute weight out of 100 (e.g. 10 means 10%)
+  section: GradingSectionType;
+}
+
+/* ---------- Site Performance Parameters (45%) ---------- */
+export const SITE_PARAMETERS: GradingParameter[] = [
+  {
+    key: "material_timely_delivery",
+    srNo: 1,
+    name: "Material Timely Delivery",
+    description:
+      "Adherence to agreed delivery schedules, avoidance of site stoppages",
+    weight: 10,
+    section: "site",
+  },
+  {
+    key: "support_at_site",
+    srNo: 2,
+    name: "Support at Site",
+    description:
+      "Availability of supervisors, engineers, troubleshooting support",
+    weight: 7,
+    section: "site",
+  },
+  {
+    key: "execution_time",
+    srNo: 3,
+    name: "Execution Time at Site",
+    description: "Ability to meet milestones and closure timelines",
+    weight: 7,
+    section: "site",
+  },
+  {
+    key: "safety_compliance",
+    srNo: 4,
+    name: "Safety Compliance",
+    description: "PPE usage, safety documentation, incident history",
+    weight: 7,
+    section: "site",
+  },
+  {
+    key: "workmanship_quality",
+    srNo: 5,
+    name: "Workmanship Quality",
+    description: "Compliance with specs, rework percentage, final acceptance",
+    weight: 7,
+    section: "site",
+  },
+  {
+    key: "planning_coordination",
+    srNo: 6,
+    name: "Planning & Coordination",
+    description:
+      "Coordination with site team, method statements, work sequencing",
+    weight: 3,
+    section: "site",
+  },
+  {
+    key: "responsiveness_rectification",
+    srNo: 7,
+    name: "Responsiveness & Rectification",
+    description: "Speed and quality of defect rectification",
+    weight: 4,
+    section: "site",
+  },
+];
+
+/* ---------- Procurement Performance Parameters (30%) ---------- */
+export const PROCUREMENT_PARAMETERS: GradingParameter[] = [
+  {
+    key: "timely_response_rfq",
+    srNo: 1,
+    name: "Timely Response to RFQ",
+    description: "Speed and completeness of RFQ responses",
+    weight: 5,
+    section: "procurement",
+  },
+  {
+    key: "negotiation_approach",
+    srNo: 2,
+    name: "Negotiation Approach",
+    description: "Commercial flexibility, cost realism, value orientation",
+    weight: 5,
+    section: "procurement",
+  },
+  {
+    key: "data_sharing",
+    srNo: 3,
+    name: "Data Sharing",
+    description: "Accuracy & timeliness of technical/commercial documents",
+    weight: 5,
+    section: "procurement",
+  },
+  {
+    key: "flexibility_payment_terms",
+    srNo: 4,
+    name: "Flexibility on Payment Terms",
+    description: "Willingness to align with company payment structure",
+    weight: 5,
+    section: "procurement",
+  },
+  {
+    key: "timely_lc_bg_submission",
+    srNo: 5,
+    name: "Timely LC / BG Submission",
+    description: "Compliance with contractual financial securities",
+    weight: 5,
+    section: "procurement",
+  },
+  {
+    key: "no_delivery_hold_payment",
+    srNo: 6,
+    name: "No Delivery / Work Hold due to Payment",
+    description: "Professional handling of payment cycles",
+    weight: 3,
+    section: "procurement",
+  },
+  {
+    key: "contractual_compliance",
+    srNo: 7,
+    name: "Contractual Compliance",
+    description: "Adherence to PO/contract terms without disputes",
+    weight: 2,
+    section: "procurement",
+  },
+];
+
+/* ---------- Financial Performance Parameters (25%) ---------- */
+export const FINANCIAL_PARAMETERS: GradingParameter[] = [
+  {
+    key: "revenue_trend",
+    srNo: 1,
+    name: "Revenue Trend (3 yrs)",
+    description: "Stable / growing revenue, no sharp drops",
+    weight: 6,
+    section: "financial",
+  },
+  {
+    key: "profitability_trend",
+    srNo: 2,
+    name: "Profitability Trend",
+    description: "Positive & improving EBITDA/PAT",
+    weight: 6,
+    section: "financial",
+  },
+  {
+    key: "liquidity_position",
+    srNo: 3,
+    name: "Liquidity Position",
+    description: "Current ratio, WC adequacy",
+    weight: 5,
+    section: "financial",
+  },
+  {
+    key: "debt_solvency",
+    srNo: 4,
+    name: "Debt & Solvency",
+    description: "Debt-equity, interest coverage",
+    weight: 4,
+    section: "financial",
+  },
+  {
+    key: "cash_flow_health",
+    srNo: 5,
+    name: "Cash Flow Health",
+    description: "Operating cash flow positive",
+    weight: 4,
+    section: "financial",
+  },
+];
+
+/** All parameters combined */
+export const ALL_GRADING_PARAMETERS: GradingParameter[] = [
+  ...SITE_PARAMETERS,
+  ...PROCUREMENT_PARAMETERS,
+  ...FINANCIAL_PARAMETERS,
+];
+
+/** Get parameters for a section */
+export function getParametersForSection(
+  section: GradingSectionType
+): GradingParameter[] {
+  switch (section) {
+    case "site":
+      return SITE_PARAMETERS;
+    case "procurement":
+      return PROCUREMENT_PARAMETERS;
+    case "financial":
+      return FINANCIAL_PARAMETERS;
+  }
+}
+
+/* ---------- Reviewer Assignment ---------- */
+export interface ReviewerAssignment {
+  id?: number;
+  vendorId: string;
+  sectionType: GradingSectionType;
+  reviewerEmail: string;
+  assignedBy: string;
+  assignedAt: string;
+}
+
+/* ---------- Vendor Rating (individual parameter) ---------- */
+export interface VendorRating {
+  vendorId: string;
+  sectionType: GradingSectionType;
+  parameterKey: string;
+  rating: RatingValue;
+  ratedBy: string;
+  ratedAt: string;
+}
+
+/** All ratings for a section submitted by one reviewer */
+export interface SectionRatings {
+  vendorId: string;
+  sectionType: GradingSectionType;
+  ratings: Record<string, number>; // parameterKey -> rating (1-5)
+  ratedBy: string;
+  submittedAt?: string;
+}
+
+/* ---------- Vendor Grade ---------- */
+export type GradeCategory = "A" | "B" | "C" | "D";
+
+export interface GradeThreshold {
+  minScore: number;
+  grade: GradeCategory;
+  label: string;
+  category: string;
+  financialGate: string;
+}
+
+export const GRADE_THRESHOLDS: GradeThreshold[] = [
+  {
+    minScore: 85,
+    grade: "A",
+    label: "Strategic Vendor",
+    category: "Strategic Vendor",
+    financialGate: "Strong financials",
+  },
+  {
+    minScore: 70,
+    grade: "B",
+    label: "Approved Vendor",
+    category: "Approved Vendor",
+    financialGate: "Acceptable",
+  },
+  {
+    minScore: 55,
+    grade: "C",
+    label: "Conditional Vendor",
+    category: "Conditional Vendor",
+    financialGate: "Financial watchlist",
+  },
+  {
+    minScore: 0,
+    grade: "D",
+    label: "High-Risk Vendor",
+    category: "High-Risk Vendor",
+    financialGate: "Avoid / short-term only",
+  },
+];
+
+export function getGradeForScore(score: number): GradeThreshold {
+  for (const t of GRADE_THRESHOLDS) {
+    if (score >= t.minScore) return t;
+  }
+  return GRADE_THRESHOLDS[GRADE_THRESHOLDS.length - 1];
+}
+
+/**
+ * Compute section score from ratings.
+ * Formula: sum of ((rating / 5) * weight * 100) for each parameter
+ * But since weight is already in %, result = sum of ((rating/5) * weight)
+ */
+export function computeSectionScore(
+  section: GradingSectionType,
+  ratings: Record<string, number>
+): number {
+  const params = getParametersForSection(section);
+  let score = 0;
+  for (const p of params) {
+    const rating = ratings[p.key] || 0;
+    score += (rating / 5) * p.weight;
+  }
+  return Math.round(score * 100) / 100;
+}
+
+export interface VendorGrade {
+  vendorId: string;
+  siteScore: number;
+  procurementScore: number;
+  financialScore: number;
+  totalScore: number;
+  computedGrade: GradeCategory | null;
+  adminOverrideGrade: GradeCategory | null;
+  finalGrade: GradeCategory | null;
+  computedAt: string | null;
+  overriddenBy: string | null;
+  overriddenAt: string | null;
+}
+
+/** Status of review for a vendor (admin view) */
+export interface VendorReviewStatus {
+  vendorId: string;
+  site: {
+    assigned: boolean;
+    reviewerEmail: string | null;
+    submitted: boolean;
+    score: number;
+  };
+  procurement: {
+    assigned: boolean;
+    reviewerEmail: string | null;
+    submitted: boolean;
+    score: number;
+  };
+  financial: {
+    assigned: boolean;
+    reviewerEmail: string | null;
+    submitted: boolean;
+    score: number;
+  };
+  grade: VendorGrade | null;
+}
+
+/* ========================= LEGACY (kept for backward compat) ========================= */
+
 export interface VendorScores {
   companyDetails: number;
   financialDetails: number;
@@ -190,6 +558,8 @@ export interface ScoringMatrix {
 export interface User {
   email: string;
   isAdmin: boolean;
+  isReviewer?: boolean;
+  isDueDiligence?: boolean;
   otp?: string;
   otpExpiry?: string;
   verified: boolean;

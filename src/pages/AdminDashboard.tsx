@@ -29,7 +29,7 @@ import {
   ScoringMatrix,
   CAPEX_BANDS,
 } from "@/types/vendor";
-import { VendorDetailModal } from "@/components/admin/VendorDetailModal";
+import VendorDetailModal from "@/components/admin/VendorDetailModal";
 import { ScoringMatrixEditor } from "@/components/admin/ScoringMatrixEditor";
 import { AnalyticsCharts } from "@/components/admin/AnalyticsCharts";
 import {
@@ -610,20 +610,16 @@ const AdminDashboard: React.FC = () => {
       </div>
 
       {/* Vendor Detail Modal */}
-      {selectedVendor && (
-        <VendorDetailModal
-          vendor={selectedVendor}
-          classification={classifications.get(selectedVendor.id!)}
-          scoringMatrix={scoringMatrix}
-          onClose={() => setSelectedVendor(null)}
-          onSaveClassification={async (classification) => {
-            await saveClassification(classification);
-            await loadData();
-          }}
-        />
-      )}
+      <VendorDetailModal
+        vendorId={selectedVendor?.id || null}
+        open={!!selectedVendor}
+        onOpenChange={(open) => {
+          if (!open) setSelectedVendor(null);
+        }}
+        onUpdate={loadData}
+      />
 
-      {/* Scoring Matrix Editor */}
+      {/* Scoring Matrix Editor Modal */}
       {showScoring && scoringMatrix && (
         <ScoringMatrixEditor
           matrix={scoringMatrix}

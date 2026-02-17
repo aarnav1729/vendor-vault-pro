@@ -12,7 +12,6 @@ import {
 import { useToast } from "@/hooks/use-toast";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { ADMIN_EMAIL, DUE_DILIGENCE_EMAIL } from "@/types/vendor";
 import {
   Mail,
   KeyRound,
@@ -25,7 +24,6 @@ import {
 const Login: React.FC = () => {
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-
   const [step, setStep] = useState<"email" | "otp">("email");
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
@@ -56,14 +54,11 @@ const Login: React.FC = () => {
         throw new Error(data?.error || "REQUEST_OTP_FAILED");
       }
 
-      
       setStep("otp");
-
       toast({
         title: "OTP Sent",
         description: "Please check your email for the OTP.",
       });
-      
     } catch (error) {
       toast({
         title: "Error",
@@ -106,10 +101,13 @@ const Login: React.FC = () => {
         description: "You have been successfully logged in.",
       });
 
+      // Route based on role priority: admin > due-diligence > reviewer > vendor
       if (sessionUser.isAdmin) {
         navigate("/admin");
       } else if (sessionUser.isDueDiligence) {
         navigate("/due-diligence");
+      } else if (sessionUser.isReviewer) {
+        navigate("/reviewer");
       } else {
         navigate("/vendor-form");
       }
@@ -134,16 +132,13 @@ const Login: React.FC = () => {
       });
 
       const data = await res.json();
-      if (!res.ok || !data?.ok)
-        throw new Error(data?.error || "REQUEST_OTP_FAILED");
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "REQUEST_OTP_FAILED");
 
-      
       setOtp("");
       toast({
         title: "OTP Resent",
         description: "A new OTP has been sent to your email.",
       });
-      
     } catch {
       toast({
         title: "Error",
@@ -158,12 +153,10 @@ const Login: React.FC = () => {
   const handleChangeEmail = () => {
     setStep("email");
     setOtp("");
-
   };
 
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Left side - Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary to-primary/80 p-12 flex-col justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary-foreground/20 flex items-center justify-center">
@@ -173,7 +166,6 @@ const Login: React.FC = () => {
             Premier Energies
           </span>
         </div>
-
         <div className="space-y-6">
           <h1 className="text-4xl font-bold text-primary-foreground leading-tight">
             Vendor Management
@@ -184,7 +176,6 @@ const Login: React.FC = () => {
             Streamline your vendor registration and management process with our
             comprehensive platform.
           </p>
-
           <div className="flex items-center gap-4 pt-4">
             <div className="flex items-center gap-2 text-primary-foreground/70">
               <Shield className="w-5 h-5" />
@@ -192,13 +183,11 @@ const Login: React.FC = () => {
             </div>
           </div>
         </div>
-
         <p className="text-primary-foreground/60 text-sm">
           © 2025 Premier Energies Limited. All rights reserved.
         </p>
       </div>
 
-      {/* Right side - Login Form */}
       <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
           <div className="lg:hidden flex items-center gap-3 justify-center mb-8">
@@ -237,19 +226,12 @@ const Login: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <Button
-                    onClick={handleSendOTP}
-                    disabled={loading}
-                    className="w-full"
-                    size="lg"
-                  >
+                  <Button onClick={handleSendOTP} disabled={loading} className="w-full" size="lg">
                     {loading ? "Sending..." : "Send OTP"}
                   </Button>
                 </>
               ) : (
                 <>
-
-
                   <div className="space-y-2">
                     <label className="input-label">Enter OTP</label>
                     <div className="relative">
@@ -263,13 +245,10 @@ const Login: React.FC = () => {
                         }
                         className="pl-10 text-center text-xl tracking-widest font-mono"
                         maxLength={6}
-                        onKeyDown={(e) =>
-                          e.key === "Enter" && handleVerifyOTP()
-                        }
+                        onKeyDown={(e) => e.key === "Enter" && handleVerifyOTP()}
                       />
                     </div>
                   </div>
-
                   <Button
                     onClick={handleVerifyOTP}
                     disabled={loading || otp.length !== 6}
@@ -278,24 +257,12 @@ const Login: React.FC = () => {
                   >
                     {loading ? "Verifying..." : "Verify OTP"}
                   </Button>
-
                   <div className="flex items-center justify-between pt-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleChangeEmail}
-                      className="text-muted-foreground"
-                    >
+                    <Button variant="ghost" size="sm" onClick={handleChangeEmail} className="text-muted-foreground">
                       <ArrowLeft className="w-4 h-4 mr-1" />
                       Change Email
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleResendOTP}
-                      disabled={loading}
-                      className="text-muted-foreground"
-                    >
+                    <Button variant="ghost" size="sm" onClick={handleResendOTP} disabled={loading} className="text-muted-foreground">
                       <RefreshCw className="w-4 h-4 mr-1" />
                       Resend OTP
                     </Button>

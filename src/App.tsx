@@ -9,16 +9,23 @@ import VendorForm from "./pages/VendorForm";
 import AdminDashboard from "./pages/AdminDashboard";
 import VendorRanking from "./pages/VendorRanking";
 import DueDiligenceDashboard from "./pages/DueDiligenceDashboard";
+import ReviewerDashboard from "./pages/ReviewerDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean; dueDiligenceOnly?: boolean }> = ({ 
-  children, 
+const ProtectedRoute: React.FC<{
+  children: React.ReactNode;
+  adminOnly?: boolean;
+  dueDiligenceOnly?: boolean;
+  reviewerOnly?: boolean;
+}> = ({
+  children,
   adminOnly = false,
-  dueDiligenceOnly = false
+  dueDiligenceOnly = false,
+  reviewerOnly = false,
 }) => {
-  const { user, loading, isAdmin, isDueDiligence } = useAuth();
+  const { user, loading, isAdmin, isDueDiligence, isReviewer } = useAuth();
 
   if (loading) {
     return (
@@ -40,6 +47,10 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean;
     return <Navigate to="/vendor-form" replace />;
   }
 
+  if (reviewerOnly && !isReviewer) {
+    return <Navigate to="/vendor-form" replace />;
+  }
+
   return <>{children}</>;
 };
 
@@ -47,37 +58,45 @@ const AppRoutes = () => {
   return (
     <Routes>
       <Route path="/" element={<Login />} />
-      <Route 
-        path="/vendor-form" 
+      <Route
+        path="/vendor-form"
         element={
           <ProtectedRoute>
             <VendorForm />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/admin" 
+      <Route
+        path="/admin"
         element={
           <ProtectedRoute adminOnly>
             <AdminDashboard />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/admin/rankings" 
+      <Route
+        path="/admin/rankings"
         element={
           <ProtectedRoute adminOnly>
             <VendorRanking />
           </ProtectedRoute>
-        } 
+        }
       />
-      <Route 
-        path="/due-diligence" 
+      <Route
+        path="/due-diligence"
         element={
           <ProtectedRoute dueDiligenceOnly>
             <DueDiligenceDashboard />
           </ProtectedRoute>
-        } 
+        }
+      />
+      <Route
+        path="/reviewer"
+        element={
+          <ProtectedRoute reviewerOnly>
+            <ReviewerDashboard />
+          </ProtectedRoute>
+        }
       />
       <Route path="*" element={<NotFound />} />
     </Routes>

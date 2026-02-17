@@ -7,6 +7,11 @@ import {
   DueDiligenceVerification,
   DEFAULT_DOCUMENTS,
   ADMIN_EMAILS,
+  ReviewerAssignment,
+  VendorRating,
+  VendorGrade,
+  GradingSectionType,
+  GradeCategory,
 } from "@/types/vendor";
 
 interface VendorDB extends DBSchema {
@@ -47,7 +52,7 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
       "Content-Type": "application/json",
       ...(init && init.headers ? init.headers : {}),
     },
-    credentials: "include", // IMPORTANT for JWT cookie
+    credentials: "include",
   });
 
   const data = await res.json().catch(() => ({}));
@@ -63,7 +68,6 @@ function isBrowserFile(x: any): x is File {
 }
 
 async function ensureStoredFile(x: any) {
-  // Already StoredFile
   if (
     x &&
     typeof x === "object" &&
@@ -73,7 +77,6 @@ async function ensureStoredFile(x: any) {
     return x;
   }
 
-  // Raw File -> StoredFile
   if (isBrowserFile(x)) {
     const data = await fileToBase64(x);
     return {
@@ -94,10 +97,8 @@ async function normalizeVendorForSave(
 ): Promise<VendorFormData> {
   const v: any = { ...vendor };
 
-  // Ensure ids
   if (!v.id) v.id = crypto.randomUUID();
 
-  // Normalize documents: attached flag + ensure StoredFile structure
   if (Array.isArray(v.documents)) {
     v.documents = await Promise.all(
       v.documents.map(async (d: any) => {
@@ -109,19 +110,17 @@ async function normalizeVendorForSave(
         return {
           ...d,
           files,
-          attached: files.length > 0, // keep compatibility if UI uses attached
+          attached: files.length > 0,
         };
       })
     );
   }
 
-  // MSME certificate if present as File
   if (v.companyDetails?.msmeCertificate) {
     const converted = await ensureStoredFile(v.companyDetails.msmeCertificate);
     if (converted) v.companyDetails.msmeCertificate = converted;
   }
 
-  // Turnover attachments if present as File
   const atts = v.financialDetails?.annualTurnover?.attachments;
   if (Array.isArray(atts)) {
     const converted = (await Promise.all(atts.map(ensureStoredFile))).filter(
@@ -130,7 +129,6 @@ async function normalizeVendorForSave(
     v.financialDetails.annualTurnover.attachments = converted;
   }
 
-  // Contact persons: ensure isPrimary exists
   if (Array.isArray(v.contactPersons)) {
     v.contactPersons = v.contactPersons.map((c: any) => ({
       ...c,
@@ -138,7 +136,6 @@ async function normalizeVendorForSave(
     }));
   }
 
-  // Update timestamps + completion
   v.updatedAt = new Date().toISOString();
   v.completionPercentage = calculateCompletion(v);
 
@@ -150,28 +147,19 @@ export const getDB = async () => {
     dbPromise = openDB<VendorDB>("vendor-management-db", 2, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
-          // Users store
           const userStore = db.createObjectStore("users", { keyPath: "email" });
           userStore.createIndex("by-email", "email");
-
-          // Vendors store
           const vendorStore = db.createObjectStore("vendors", {
             keyPath: "id",
           });
           vendorStore.createIndex("by-email", "email");
-
-          // Classifications store
           const classStore = db.createObjectStore("classifications", {
             keyPath: "vendorId",
           });
           classStore.createIndex("by-vendorId", "vendorId");
-
-          // Scoring matrix store
           db.createObjectStore("scoringMatrix", { keyPath: "id" });
         }
-
         if (oldVersion < 2) {
-          // Due diligence store
           if (!db.objectStoreNames.contains("dueDiligence")) {
             const ddStore = db.createObjectStore("dueDiligence", {
               keyPath: "vendorId",
@@ -189,32 +177,27 @@ export const getDB = async () => {
 export const createOrGetUser = async (email: string): Promise<User> => {
   const db = await getDB();
   let user = await db.get("users", email);
-
   if (!user) {
     user = {
       email,
       isAdmin: ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(
         email.toLowerCase()
       ),
-
       verified: false,
     };
     await db.put("users", user);
   }
-
   return user;
 };
 
 export const generateOTP = async (email: string): Promise<string> => {
   const db = await getDB();
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
-
+  const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const user = await createOrGetUser(email);
   user.otp = otp;
   user.otpExpiry = expiry;
   await db.put("users", user);
-
   return otp;
 };
 
@@ -224,18 +207,14 @@ export const verifyOTP = async (
 ): Promise<boolean> => {
   const db = await getDB();
   const user = await db.get("users", email);
-
   if (!user || !user.otp || !user.otpExpiry) return false;
-
   const isValid = user.otp === otp && new Date(user.otpExpiry) > new Date();
-
   if (isValid) {
     user.verified = true;
     user.otp = undefined;
     user.otpExpiry = undefined;
     await db.put("users", user);
   }
-
   return isValid;
 };
 
@@ -329,32 +308,18 @@ export const saveVendorForm = async (
   vendor: VendorFormData
 ): Promise<VendorFormData> => {
   const db = await getDB();
-
-  // Normalize (also converts File -> base64 StoredFile)
   const normalized = await normalizeVendorForSave(vendor);
-
   try {
-    // Save to server (primary)
     const saved = await apiJson<{ ok: true; vendor: VendorFormData }>(
       "/vendor/save",
-      {
-        method: "POST",
-        body: JSON.stringify({ vendor: normalized }),
-      }
+      { method: "POST", body: JSON.stringify({ vendor: normalized }) }
     );
-
-    // Cache locally
     await db.put("vendors", saved.vendor);
-
-    // IMPORTANT: return the vendor so UI can stay in sync with server-computed completionPercentage/updatedAt
     return saved.vendor;
   } catch (e) {
-    // Ensure "everything is saved" at least locally even if server fails (offline/500/etc.)
     try {
       await db.put("vendors", normalized);
-    } catch {
-      // ignore local cache failure
-    }
+    } catch {}
     throw e;
   }
 };
@@ -363,19 +328,13 @@ export const submitVendorForm = async (
   vendor: VendorFormData
 ): Promise<VendorFormData> => {
   const db = await getDB();
-
   const normalized: any = await normalizeVendorForSave(vendor);
   normalized.submitted = true;
   normalized.completionPercentage = 100;
-
   const saved = await apiJson<{ ok: true; vendor: VendorFormData }>(
     "/vendor/submit",
-    {
-      method: "POST",
-      body: JSON.stringify({ vendor: normalized }),
-    }
+    { method: "POST", body: JSON.stringify({ vendor: normalized }) }
   );
-
   await db.put("vendors", saved.vendor);
   return saved.vendor;
 };
@@ -383,29 +342,19 @@ export const submitVendorForm = async (
 export const getVendorByEmail = async (
   _email: string
 ): Promise<VendorFormData | undefined> => {
-  // Server is source of truth for the logged-in vendor
   try {
     const data = await apiJson<{ ok: true; vendor: VendorFormData }>(
       "/vendor/me"
     );
-    const vendor = data.vendor;
-
-    // Cache locally (best-effort)
     try {
       const db = await getDB();
-      await db.put("vendors", vendor);
-    } catch {
-      // ignore cache failure
-    }
-
-    return vendor;
+      await db.put("vendors", data.vendor);
+    } catch {}
+    return data.vendor;
   } catch {
-    // Fallback: local cache only (offline scenario)
     const db = await getDB();
     const vendors = await db.getAllFromIndex("vendors", "by-email", _email);
     if (!vendors.length) return undefined;
-
-    // pick latest
     vendors.sort((a, b) =>
       (b.updatedAt || "").localeCompare(a.updatedAt || "")
     );
@@ -416,30 +365,22 @@ export const getVendorByEmail = async (
 export const getVendorById = async (
   id: string
 ): Promise<VendorFormData | undefined> => {
-  // For admin: fetch full vendor JSON from server (source of truth).
   try {
     const data = await apiJson<{ ok: true; vendor: VendorFormData }>(
       `/admin/vendors/${id}`
     );
-
-    // cache best-effort
     try {
       const db = await getDB();
       await db.put("vendors", data.vendor);
-    } catch {
-      // ignore cache failure
-    }
-
+    } catch {}
     return data.vendor;
   } catch {
-    // fallback to IndexedDB
     const db = await getDB();
     return db.get("vendors", id);
   }
 };
 
 export const getAllVendors = async (): Promise<VendorFormData[]> => {
-  // Admin should see server truth (MSSQL). Fallback to IndexedDB only if API fails.
   try {
     const data = await apiJson<{
       ok: true;
@@ -456,62 +397,45 @@ export const getAllVendors = async (): Promise<VendorFormData[]> => {
     }>("/admin/vendors");
 
     const list: VendorFormData[] = data.vendors.map((s) => {
-      // Create a safe, full-ish VendorFormData shape so AdminDashboard doesn't crash
       const v = createEmptyVendorForm(s.email);
-
       v.id = s.id;
       v.email = s.email;
       v.companyDetails.companyName = s.companyName || "";
       v.completionPercentage = Number(s.completionPercentage || 0);
       v.createdAt = s.createdAt || v.createdAt;
       v.updatedAt = s.updatedAt || v.updatedAt;
-
-      // These may exist in your types; harmless if not used elsewhere
       (v as any).submitted = !!s.submitted;
       (v as any).submittedAt = s.submittedAt ?? null;
-
       return v;
     });
 
-    // Best-effort cache
     try {
       const db = await getDB();
       await Promise.all(list.map((v) => db.put("vendors", v)));
-    } catch {
-      // ignore cache failures
-    }
-
+    } catch {}
     return list;
   } catch {
-    // Offline / server error fallback
     const db = await getDB();
     return db.getAll("vendors");
   }
 };
 
-// Classification functions
+// Classification functions (legacy – kept)
 export const saveClassification = async (
   classification: VendorClassification
 ): Promise<void> => {
   const vendorId = String((classification as any).vendorId || "");
   if (!vendorId) throw new Error("MISSING_VENDOR_ID");
 
-  // Save to server first
-  const saved = await apiJson<{
-    ok: true;
-    classification: VendorClassification;
-  }>(`/admin/classifications/${vendorId}`, {
+  await apiJson<{ ok: true }>(`/admin/classifications/${vendorId}`, {
     method: "PUT",
     body: JSON.stringify({ classification }),
   });
 
-  // Cache locally best-effort
   try {
     const db = await getDB();
-    await db.put("classifications", saved.classification);
-  } catch {
-    // ignore
-  }
+    await db.put("classifications", classification);
+  } catch {}
 };
 
 export const getClassification = async (
@@ -529,17 +453,12 @@ export const getAllClassifications = async (): Promise<
       ok: true;
       classifications: VendorClassification[];
     }>("/admin/classifications");
-
-    // cache best-effort
     try {
       const db = await getDB();
       await Promise.all(
         data.classifications.map((c) => db.put("classifications", c))
       );
-    } catch {
-      // ignore
-    }
-
+    } catch {}
     return data.classifications;
   } catch {
     const db = await getDB();
@@ -547,27 +466,20 @@ export const getAllClassifications = async (): Promise<
   }
 };
 
-// Scoring Matrix functions
+// Scoring Matrix functions (legacy)
 export const getScoringMatrix = async (): Promise<ScoringMatrix> => {
   try {
     const data = await apiJson<{ ok: true; matrix: ScoringMatrix }>(
       "/scoring-matrix"
     );
-
-    // cache best-effort
     try {
       const db = await getDB();
       await db.put("scoringMatrix", data.matrix);
-    } catch {
-      // ignore
-    }
-
+    } catch {}
     return data.matrix;
   } catch {
-    // fallback to IndexedDB default behavior
     const db = await getDB();
     let matrix = await db.get("scoringMatrix", "default");
-
     if (!matrix) {
       matrix = {
         id: "default",
@@ -588,19 +500,146 @@ export const saveScoringMatrix = async (
 ): Promise<void> => {
   const saved = await apiJson<{ ok: true; matrix: ScoringMatrix }>(
     "/scoring-matrix",
-    {
-      method: "PUT",
-      body: JSON.stringify({ matrix }),
-    }
+    { method: "PUT", body: JSON.stringify({ matrix }) }
   );
-
-  // cache best-effort
   try {
     const db = await getDB();
     await db.put("scoringMatrix", saved.matrix);
-  } catch {
-    // ignore
-  }
+  } catch {}
+};
+
+/* ========================= NEW GRADING API FUNCTIONS ========================= */
+
+// Reviewer assignments
+export const assignReviewer = async (
+  vendorId: string,
+  sectionType: GradingSectionType,
+  reviewerEmail: string
+): Promise<void> => {
+  await apiJson<{ ok: true }>("/admin/reviewers/assign", {
+    method: "POST",
+    body: JSON.stringify({ vendorId, sectionType, reviewerEmail }),
+  });
+};
+
+export const removeReviewerAssignment = async (
+  assignmentId: number
+): Promise<void> => {
+  await apiJson<{ ok: true }>(`/admin/reviewers/${assignmentId}`, {
+    method: "DELETE",
+  });
+};
+
+export const getReviewerAssignments = async (
+  vendorId: string
+): Promise<ReviewerAssignment[]> => {
+  const data = await apiJson<{ ok: true; assignments: ReviewerAssignment[] }>(
+    `/admin/reviewers/${vendorId}`
+  );
+  return data.assignments;
+};
+
+// Reviewer: my assignments
+export const getMyReviewerAssignments = async (): Promise<
+  Array<{
+    id: number;
+    vendorId: string;
+    sectionType: GradingSectionType;
+    assignedAt: string;
+    vendor: {
+      companyName: string;
+      email: string;
+      completionPercentage: number;
+      submitted: boolean;
+    };
+    ratingsSubmitted: boolean;
+  }>
+> => {
+  const data = await apiJson<{ ok: true; assignments: any[] }>(
+    "/reviewer/assignments"
+  );
+  return data.assignments;
+};
+
+// Reviewer: get section-specific vendor data
+export const getVendorForReviewer = async (
+  vendorId: string
+): Promise<{ vendor: any; reviewerSections: string[] }> => {
+  const data = await apiJson<{
+    ok: true;
+    vendor: any;
+    reviewerSections: string[];
+  }>(`/admin/vendors/${vendorId}`);
+  return { vendor: data.vendor, reviewerSections: data.reviewerSections || [] };
+};
+
+// Reviewer: get/submit ratings
+export const getMyRatings = async (
+  vendorId: string,
+  sectionType: GradingSectionType
+): Promise<Record<string, number>> => {
+  const data = await apiJson<{ ok: true; ratings: Record<string, number> }>(
+    `/reviewer/ratings/${vendorId}/${sectionType}`
+  );
+  return data.ratings;
+};
+
+export const submitRatings = async (
+  vendorId: string,
+  sectionType: GradingSectionType,
+  ratings: Record<string, number>
+): Promise<void> => {
+  await apiJson<{ ok: true }>("/reviewer/rate", {
+    method: "POST",
+    body: JSON.stringify({ vendorId, sectionType, ratings }),
+  });
+};
+
+// Admin: Grades
+export const getAllGrades = async (): Promise<
+  Array<VendorGrade & { companyName: string; email: string }>
+> => {
+  const data = await apiJson<{
+    ok: true;
+    grades: Array<VendorGrade & { companyName: string; email: string }>;
+  }>("/admin/grades");
+  return data.grades;
+};
+
+export const getVendorGrade = async (
+  vendorId: string
+): Promise<VendorGrade | null> => {
+  const data = await apiJson<{ ok: true; grade: VendorGrade | null }>(
+    `/admin/grades/${vendorId}`
+  );
+  return data.grade;
+};
+
+export const computeVendorGrade = async (vendorId: string): Promise<any> => {
+  const data = await apiJson<{ ok: true; grade: any }>(
+    `/admin/grades/${vendorId}/compute`,
+    { method: "POST" }
+  );
+  return data.grade;
+};
+
+export const overrideVendorGrade = async (
+  vendorId: string,
+  grade: GradeCategory | null
+): Promise<void> => {
+  await apiJson<{ ok: true }>(`/admin/grades/${vendorId}/override`, {
+    method: "PUT",
+    body: JSON.stringify({ grade }),
+  });
+};
+
+export const getVendorAllRatings = async (
+  vendorId: string
+): Promise<VendorRating[]> => {
+  const data = await apiJson<{ ok: true; ratings: VendorRating[] }>(
+    `/admin/ratings/${vendorId}`
+  );
+  return data.ratings;
 };
 
 // Utility functions
@@ -608,7 +647,6 @@ export const calculateCompletion = (vendor: VendorFormData): number => {
   let total = 0;
   let filled = 0;
 
-  // Company Details (required fields)
   const companyRequiredFields = [
     "companyName",
     "managingDirectorName",
@@ -624,7 +662,6 @@ export const calculateCompletion = (vendor: VendorFormData): number => {
       filled++;
   });
 
-  // Address fields
   const addressFields = ["line1", "pinCode", "district", "state"];
   addressFields.forEach((field) => {
     total++;
@@ -636,7 +673,6 @@ export const calculateCompletion = (vendor: VendorFormData): number => {
       filled++;
   });
 
-  // Financial details
   const turnover = vendor.financialDetails.annualTurnover;
   total += 4;
   if (turnover.fy2022_23 > 0) filled++;
@@ -644,28 +680,24 @@ export const calculateCompletion = (vendor: VendorFormData): number => {
   if (turnover.fy2024_25 > 0) filled++;
   if (turnover.fy2025_26 > 0) filled++;
 
-  // Bank details
   const bankFields = ["bankName", "branch", "accountNumber", "ifscCode"];
   bankFields.forEach((field) => {
     total++;
     if (vendor.bankDetails[field as keyof typeof vendor.bankDetails]) filled++;
   });
 
-  // References (at least 3)
   const validRefs = vendor.vendorReferences.filter(
     (ref) => ref.companyName && ref.poDate
   ).length;
   total += 3;
   filled += Math.min(validRefs, 3);
 
-  // Contact persons (at least 1)
   const validContacts = vendor.contactPersons.filter(
     (c) => c.name && c.mailId
   ).length;
   total += 1;
   filled += Math.min(validContacts, 1);
 
-  // Documents (at least 5 core docs) — match backend (files length)
   const attachedDocs = vendor.documents.filter(
     (d) => Array.isArray(d.files) && d.files.length > 0
   ).length;
