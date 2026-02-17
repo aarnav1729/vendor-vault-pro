@@ -262,7 +262,7 @@ function mustGetEnv(name, fallback = "") {
 
 const dbConfig = {
   user: process.env.DB_USER || "PEL_DB",
-  password: process.env.DB_PASSWORD || "aarnavsingh",
+  password: process.env.DB_PASSWORD || "V@aN3#@VaN",
   server: process.env.DB_SERVER || "10.0.50.17",
   port: Number(process.env.DB_PORT || 1433),
   database: process.env.DB_NAME || "vendors",
