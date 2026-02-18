@@ -54,7 +54,9 @@ const FilePreviewLink: React.FC<{ file: StoredFile }> = ({ file }) => {
     try {
       let dataUrl = file.data;
       if (!dataUrl.startsWith("data:")) {
-        dataUrl = `data:${file.type || "application/octet-stream"};base64,${dataUrl}`;
+        dataUrl = `data:${
+          file.type || "application/octet-stream"
+        };base64,${dataUrl}`;
       }
       const w = window.open();
       if (w) {
@@ -157,7 +159,10 @@ const VendorDetailsView: React.FC<{ vendor: any }> = ({ vendor }) => {
           <InfoRow label="Company Name" value={cd.companyName} />
           <InfoRow label="Managing Director" value={cd.managingDirectorName} />
           <InfoRow label="Organisation Type" value={cd.typeOfOrganisation} />
-          <InfoRow label="Year of Establishment" value={cd.yearOfEstablishment} />
+          <InfoRow
+            label="Year of Establishment"
+            value={cd.yearOfEstablishment}
+          />
           <InfoRow label="CIN Number" value={cd.cinNumber} />
           <InfoRow label="GST Number" value={cd.gstNumber} />
           <InfoRow label="PAN Number" value={cd.panNumber} />
@@ -688,9 +693,7 @@ const ReviewerDashboard: React.FC = () => {
     const ratings = ratingsState[key] || {};
     const params = getParametersForSection(sectionType);
 
-    const missing = params.filter(
-      (p) => !ratings[p.key] || ratings[p.key] < 1
-    );
+    const missing = params.filter((p) => !ratings[p.key] || ratings[p.key] < 1);
     if (missing.length > 0) {
       toast({
         title: "Incomplete Ratings",
@@ -773,9 +776,7 @@ const ReviewerDashboard: React.FC = () => {
             <p className="text-sm text-muted-foreground">Pending</p>
           </div>
           <div className="bg-card rounded-xl p-4 border border-border">
-            <p className="text-2xl font-bold text-success">
-              {stats.submitted}
-            </p>
+            <p className="text-2xl font-bold text-success">{stats.submitted}</p>
             <p className="text-sm text-muted-foreground">Submitted</p>
           </div>
         </div>
@@ -798,9 +799,8 @@ const ReviewerDashboard: React.FC = () => {
               );
               const isExpanded = expandedKey === key;
               const SectionIcon =
-                SECTION_ICONS[
-                  assignment.sectionType as GradingSectionType
-                ] || Building2;
+                SECTION_ICONS[assignment.sectionType as GradingSectionType] ||
+                Building2;
               const params = getParametersForSection(
                 assignment.sectionType as GradingSectionType
               );
