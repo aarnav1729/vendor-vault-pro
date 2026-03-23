@@ -60,6 +60,29 @@ const DEFAULT_DOCUMENTS = [
   "PO attachments",
 ];
 
+const VALID_VENDOR_TYPES = ["capex", "opex"];
+const VALID_OPEX_SUB_TYPES = ["raw_material", "consumables", "service"];
+const VALID_CAPEX_SUB_TYPES = [
+  "civil",
+  "plant_machinery",
+  "utilities",
+  "service",
+];
+const VALID_CAPEX_BANDS = [
+  "less_than_1L",
+  "1L_to_5L",
+  "5L_to_10L",
+  "10L_to_20L",
+  "20L_to_50L",
+  "50L_to_1Cr",
+  "1Cr_to_5Cr",
+  "5Cr_to_10Cr",
+  "10Cr_to_25Cr",
+  "25Cr_to_50Cr",
+  "50Cr_to_100Cr",
+  "more_than_100Cr",
+];
+
 const COOKIE_NAME = String(process.env.COOKIE_NAME || "vmp_session");
 const JWT_SECRET = String(
   process.env.JWT_SECRET || "CHANGE_ME__SET_JWT_SECRET"
@@ -419,6 +442,7 @@ BEGIN
     VendorId UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
     VendorType NVARCHAR(32) NULL,
     OpexSubType NVARCHAR(64) NULL,
+    OpexBand NVARCHAR(64) NULL,
     CapexSubType NVARCHAR(64) NULL,
     CapexBand NVARCHAR(64) NULL,
     CompanyDetailsScore INT NOT NULL DEFAULT(0),
@@ -435,6 +459,11 @@ BEGIN
     UpdatedAt DATETIME2 NOT NULL DEFAULT(SYSUTCDATETIME())
   );
   CREATE INDEX IX_Classifications_TotalScore ON dbo.VendorClassifications(TotalScore DESC);
+END;
+
+IF COL_LENGTH('dbo.VendorClassifications', 'OpexBand') IS NULL
+BEGIN
+  ALTER TABLE dbo.VendorClassifications ADD OpexBand NVARCHAR(64) NULL;
 END;
 
 IF OBJECT_ID('dbo.DueDiligenceVerifications', 'U') IS NULL
@@ -1343,7 +1372,7 @@ app.get(
   async (_req, res) => {
     try {
       const r = await execQuery(
-        `SELECT VendorId, VendorType, OpexSubType, CapexSubType, CapexBand,
+        `SELECT VendorId, VendorType, OpexSubType, OpexBand, CapexSubType, CapexBand,
 CompanyDetailsScore, FinancialDetailsScore, BankDetailsScore, ReferencesScore, DocumentsScore,
 TotalScore, Notes, DueDiligenceSent, DueDiligenceDate, InfoRequestSent, InfoRequestDate, UpdatedAt
 FROM dbo.VendorClassifications ORDER BY TotalScore DESC, UpdatedAt DESC`
@@ -1353,6 +1382,7 @@ FROM dbo.VendorClassifications ORDER BY TotalScore DESC, UpdatedAt DESC`
         vendorId: String(c.VendorId),
         vendorType: c.VendorType ? String(c.VendorType) : null,
         opexSubType: c.OpexSubType ? String(c.OpexSubType) : null,
+        opexBand: c.OpexBand ? String(c.OpexBand) : null,
         capexSubType: c.CapexSubType ? String(c.CapexSubType) : null,
         capexBand: c.CapexBand ? String(c.CapexBand) : null,
         scores: {
@@ -1409,6 +1439,7 @@ app.get(
           vendorId: String(c.VendorId),
           vendorType: c.VendorType ? String(c.VendorType) : null,
           opexSubType: c.OpexSubType ? String(c.OpexSubType) : null,
+          opexBand: c.OpexBand ? String(c.OpexBand) : null,
           capexSubType: c.CapexSubType ? String(c.CapexSubType) : null,
           capexBand: c.CapexBand ? String(c.CapexBand) : null,
           scores: {
@@ -1453,22 +1484,42 @@ app.put(
       const body = req.body || {};
       const classification = body.classification || body;
 
-      const vendorType = classification.vendorType || null;
-      const opexSubType = classification.opexSubType || null;
-      const capexSubType = classification.capexSubType || null;
-      const capexBand = classification.capexBand || null;
+      const vendorType = VALID_VENDOR_TYPES.includes(classification.vendorType)
+        ? classification.vendorType
+        : null;
+      const opexSubType =
+        vendorType === "opex" &&
+        VALID_OPEX_SUB_TYPES.includes(classification.opexSubType)
+          ? classification.opexSubType
+          : null;
+      const opexBand =
+        vendorType === "opex" &&
+        VALID_CAPEX_BANDS.includes(classification.opexBand)
+          ? classification.opexBand
+          : null;
+      const capexSubType =
+        vendorType === "capex" &&
+        VALID_CAPEX_SUB_TYPES.includes(classification.capexSubType)
+          ? classification.capexSubType
+          : null;
+      const capexBand =
+        vendorType === "capex" &&
+        VALID_CAPEX_BANDS.includes(classification.capexBand)
+          ? classification.capexBand
+          : null;
       const notes = classification.notes ? String(classification.notes) : "";
 
       await execQuery(
         `MERGE dbo.VendorClassifications AS t
 USING (SELECT @VendorId AS VendorId) AS s
 ON (t.VendorId = TRY_CONVERT(uniqueidentifier, s.VendorId))
-WHEN MATCHED THEN UPDATE SET VendorType=@VendorType,OpexSubType=@OpexSubType,CapexSubType=@CapexSubType,CapexBand=@CapexBand,Notes=@Notes,UpdatedAt=SYSUTCDATETIME()
-WHEN NOT MATCHED THEN INSERT (VendorId,VendorType,OpexSubType,CapexSubType,CapexBand,Notes) VALUES (TRY_CONVERT(uniqueidentifier,@VendorId),@VendorType,@OpexSubType,@CapexSubType,@CapexBand,@Notes);`,
+WHEN MATCHED THEN UPDATE SET VendorType=@VendorType,OpexSubType=@OpexSubType,OpexBand=@OpexBand,CapexSubType=@CapexSubType,CapexBand=@CapexBand,Notes=@Notes,UpdatedAt=SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT (VendorId,VendorType,OpexSubType,OpexBand,CapexSubType,CapexBand,Notes) VALUES (TRY_CONVERT(uniqueidentifier,@VendorId),@VendorType,@OpexSubType,@OpexBand,@CapexSubType,@CapexBand,@Notes);`,
         {
           VendorId: vendorId,
           VendorType: vendorType,
           OpexSubType: opexSubType,
+          OpexBand: opexBand,
           CapexSubType: capexSubType,
           CapexBand: capexBand,
           Notes: notes,
@@ -2356,6 +2407,7 @@ app.get("/api/admin/rankings", requireAuth, requireAdmin, async (_req, res) => {
   ISNULL(g.TotalScore, 0) AS TotalScore,
   g.ComputedGrade, g.AdminOverrideGrade, g.FinalGrade,
   ISNULL(c.VendorType, '') AS VendorType,
+  ISNULL(c.OpexBand, '') AS OpexBand,
   ISNULL(c.CapexBand, '') AS CapexBand
 FROM dbo.Vendors v
 LEFT JOIN dbo.VendorGrades g ON g.VendorId = v.VendorId
@@ -2383,6 +2435,7 @@ ORDER BY ISNULL(g.TotalScore, 0) DESC, v.CompletionPercentage DESC, v.UpdatedAt 
         : null,
       finalGrade: row.FinalGrade ? String(row.FinalGrade) : null,
       vendorType: row.VendorType ? String(row.VendorType) : null,
+      opexBand: row.OpexBand ? String(row.OpexBand) : null,
       capexBand: row.CapexBand ? String(row.CapexBand) : null,
     }));
 

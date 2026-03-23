@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -21,21 +21,24 @@ import { useToast } from "@/hooks/use-toast";
 import {
   VendorFormData,
   VendorClassification,
-  VendorType,
-  CapexBand,
+  CAPEX_SUBTYPE_OPTIONS,
   CAPEX_BANDS,
   GradingSectionType,
+  OPEX_BANDS,
+  OPEX_SUBTYPE_OPTIONS,
   SECTION_LABELS,
   SECTION_RESPONSIBILITY,
+  VENDOR_TYPE_OPTIONS,
   RATING_LABELS,
+  getVendorBandLabel,
   getParametersForSection,
-  GradingParameter,
   GradeCategory,
-  GRADE_THRESHOLDS,
   ReviewerAssignment,
   VendorRating,
   VendorGrade,
   getGradeForScore,
+  getVendorSubtypeLabel,
+  getVendorTypeLabel,
 } from "@/types/vendor";
 import {
   getVendorById,
@@ -53,7 +56,6 @@ import {
   Building2,
   UserPlus,
   Trash2,
-  ClipboardCheck,
   RefreshCw,
   Shield,
   HardHat,
@@ -67,6 +69,8 @@ import {
 
 interface VendorDetailModalProps {
   vendorId: string | null;
+  initialVendor?: VendorFormData | null;
+  initialClassification?: VendorClassification | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdate?: () => void;
@@ -85,25 +89,68 @@ const SECTION_ICONS: Record<GradingSectionType, React.ElementType> = {
   financial: TrendingUp,
 };
 
+const UNCLASSIFIED_VALUE = "__unclassified__";
+const NONE_VALUE = "__none__";
+const DEFAULT_REVIEWER_EMAILS: Record<GradingSectionType, string> = {
+  site: "",
+  procurement: "",
+  financial: "",
+};
+
+function createEmptyClassification(vendorId: string): VendorClassification {
+  return {
+    vendorId,
+    vendorType: null,
+    opexSubType: null,
+    opexBand: null,
+    capexSubType: null,
+    capexBand: null,
+    scores: {
+      companyDetails: 0,
+      financialDetails: 0,
+      bankDetails: 0,
+      references: 0,
+      documents: 0,
+    },
+    totalScore: 0,
+    notes: "",
+    dueDiligenceSent: false,
+    infoRequestSent: false,
+  };
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
   vendorId,
+  initialVendor,
+  initialClassification,
   open,
   onOpenChange,
   onUpdate,
 }) => {
-  const [vendor, setVendor] = useState<VendorFormData | null>(null);
+  const [vendor, setVendor] = useState<VendorFormData | null>(
+    initialVendor || null
+  );
   const [classification, setClassification] =
-    useState<VendorClassification | null>(null);
+    useState<VendorClassification | null>(initialClassification || null);
   const [assignments, setAssignments] = useState<ReviewerAssignment[]>([]);
   const [ratings, setRatings] = useState<VendorRating[]>([]);
   const [grade, setGrade] = useState<VendorGrade | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [baseLoading, setBaseLoading] = useState(false);
+  const [supplementaryLoading, setSupplementaryLoading] = useState(false);
+  const [supplementaryLoaded, setSupplementaryLoaded] = useState(false);
+  const [savingClassification, setSavingClassification] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
+  const baseRequestRef = useRef(0);
+  const supplementaryRequestRef = useRef(0);
 
   // Reviewer assignment form states
   const [newReviewerEmails, setNewReviewerEmails] = useState<
     Record<GradingSectionType, string>
-  >({ site: "", procurement: "", financial: "" });
+  >(DEFAULT_REVIEWER_EMAILS);
   const [assigning, setAssigning] = useState<string | null>(null);
 
   // Override grade
@@ -112,36 +159,119 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
 
   const { toast } = useToast();
 
-  const loadData = useCallback(async () => {
+  const loadBaseData = useCallback(async () => {
     if (!vendorId) return;
-    setLoading(true);
+    const requestId = ++baseRequestRef.current;
+    setBaseLoading(true);
     try {
-      const [v, cl, asn, rat, gr] = await Promise.all([
+      const [v, cl] = await Promise.all([
         getVendorById(vendorId).catch(() => null),
         getClassification(vendorId).catch(() => null),
-        getReviewerAssignments(vendorId).catch(() => []),
-        getVendorAllRatings(vendorId).catch(() => []),
-        getVendorGrade(vendorId).catch(() => null),
       ]);
-      setVendor(v || null);
-      setClassification(cl || null);
-      setAssignments(asn || []);
-      setRatings(rat || []);
-      setGrade(gr || null);
-      setOverrideGrade(gr?.adminOverrideGrade || "none");
+      if (baseRequestRef.current !== requestId) return;
+
+      setVendor(v || initialVendor || null);
+      setClassification(
+        cl || initialClassification || createEmptyClassification(vendorId)
+      );
     } catch (e) {
       console.error("Failed to load vendor detail data:", e);
     } finally {
-      setLoading(false);
+      if (baseRequestRef.current === requestId) {
+        setBaseLoading(false);
+      }
     }
-  }, [vendorId]);
+  }, [vendorId, initialVendor, initialClassification]);
 
   useEffect(() => {
     if (open && vendorId) {
-      loadData();
+      supplementaryRequestRef.current += 1;
       setActiveTab("details");
+      setVendor(initialVendor || null);
+      setClassification(
+        initialClassification || createEmptyClassification(vendorId)
+      );
+      setAssignments([]);
+      setRatings([]);
+      setGrade(null);
+      setOverrideGrade("none");
+      setSupplementaryLoaded(false);
+      setSupplementaryLoading(false);
+      setNewReviewerEmails(DEFAULT_REVIEWER_EMAILS);
+      loadBaseData();
     }
-  }, [open, vendorId, loadData]);
+  }, [open, vendorId, initialVendor, initialClassification, loadBaseData]);
+
+  const loadSupplementaryData = useCallback(
+    async (force = false) => {
+      if (
+        !vendorId ||
+        (!force && (supplementaryLoaded || supplementaryLoading))
+      ) {
+        return;
+      }
+
+      const requestId = ++supplementaryRequestRef.current;
+      setSupplementaryLoading(true);
+      try {
+        const [asn, rat, gr] = await Promise.all([
+          getReviewerAssignments(vendorId).catch(() => []),
+          getVendorAllRatings(vendorId).catch(() => []),
+          getVendorGrade(vendorId).catch(() => null),
+        ]);
+
+        if (supplementaryRequestRef.current !== requestId) return;
+
+        setAssignments(asn || []);
+        setRatings(rat || []);
+        setGrade(gr || null);
+        setOverrideGrade(gr?.adminOverrideGrade || "none");
+        setSupplementaryLoaded(true);
+      } catch (e) {
+        console.error("Failed to load vendor review data:", e);
+      } finally {
+        if (supplementaryRequestRef.current === requestId) {
+          setSupplementaryLoading(false);
+        }
+      }
+    },
+    [vendorId, supplementaryLoaded, supplementaryLoading]
+  );
+
+  useEffect(() => {
+    if (open && activeTab !== "details") {
+      loadSupplementaryData();
+    }
+  }, [open, activeTab, loadSupplementaryData]);
+
+  const handleSaveClassification = async () => {
+    if (!vendorId) return;
+
+    const payload = classification || createEmptyClassification(vendorId);
+    setSavingClassification(true);
+    try {
+      await saveClassification(payload);
+      setClassification(payload);
+      toast({
+        title: "Classification saved",
+        description: [
+          getVendorTypeLabel(payload.vendorType),
+          getVendorSubtypeLabel(payload),
+        ]
+          .filter(Boolean)
+          .join(" • ") || "Vendor moved to unclassified",
+      });
+      onUpdate?.();
+    } catch (e: unknown) {
+      toast({
+        title: "Save failed",
+        description: getErrorMessage(e),
+        variant: "destructive",
+      });
+    } finally {
+      setSavingClassification(false);
+    }
+  };
 
   const handleAssignReviewer = async (section: GradingSectionType) => {
     const email = newReviewerEmails[section]?.trim().toLowerCase();
@@ -159,11 +289,11 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
         description: `${email} → ${SECTION_LABELS[section]}`,
       });
       setNewReviewerEmails((prev) => ({ ...prev, [section]: "" }));
-      await loadData();
-    } catch (e: any) {
+      await loadSupplementaryData(true);
+    } catch (e: unknown) {
       toast({
         title: "Assignment failed",
-        description: String(e?.message || e),
+        description: getErrorMessage(e),
         variant: "destructive",
       });
     } finally {
@@ -175,11 +305,11 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
     try {
       await removeReviewerAssignment(assignmentId);
       toast({ title: "Assignment removed" });
-      await loadData();
-    } catch (e: any) {
+      await loadSupplementaryData(true);
+    } catch (e: unknown) {
       toast({
         title: "Remove failed",
-        description: String(e?.message || e),
+        description: getErrorMessage(e),
         variant: "destructive",
       });
     }
@@ -190,12 +320,12 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
     try {
       await computeVendorGrade(vendorId);
       toast({ title: "Grade recomputed" });
-      await loadData();
+      await loadSupplementaryData(true);
       onUpdate?.();
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         title: "Compute failed",
-        description: String(e?.message || e),
+        description: getErrorMessage(e),
         variant: "destructive",
       });
     }
@@ -209,12 +339,12 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
         overrideGrade === "none" ? null : (overrideGrade as GradeCategory);
       await overrideVendorGrade(vendorId, g);
       toast({ title: g ? `Grade overridden to ${g}` : "Override removed" });
-      await loadData();
+      await loadSupplementaryData(true);
       onUpdate?.();
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         title: "Override failed",
-        description: String(e?.message || e),
+        description: getErrorMessage(e),
         variant: "destructive",
       });
     } finally {
@@ -238,7 +368,12 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
   const assignmentsForSection = (section: GradingSectionType) =>
     assignments.filter((a) => a.sectionType === section);
 
-  const companyName = vendor?.companyDetails?.companyName || "Unnamed Vendor";
+  const editableClassification =
+    classification || (vendorId ? createEmptyClassification(vendorId) : null);
+  const companyName =
+    vendor?.companyDetails?.companyName ||
+    initialVendor?.companyDetails?.companyName ||
+    "Vendor Details";
 
   if (!vendorId) return null;
 
@@ -248,11 +383,11 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="w-5 h-5 text-primary" />
-            {loading ? "Loading..." : companyName}
+            {companyName}
           </DialogTitle>
         </DialogHeader>
 
-        {loading ? (
+        {baseLoading ? (
           <div className="py-12 text-center text-muted-foreground animate-pulse">
             Loading vendor data...
           </div>
@@ -321,21 +456,306 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
                   </div>
 
                   {/* Classification */}
-                  <div className="bg-muted/30 rounded-lg p-4 space-y-2">
-                    <h3 className="font-semibold text-sm">Classification</h3>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Type:</span>{" "}
-                        {classification?.vendorType || "Not classified"}
+                  <div className="bg-muted/30 rounded-lg p-4 space-y-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="space-y-1">
+                        <h3 className="font-semibold text-sm">
+                          Vendor Classification
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          Opex segregation: Raw Material, Consumables, Service
+                          Vendors. Capex segregation: Civil Vendors, Plant &
+                          Machinery, Utilities, Service Vendors.
+                        </p>
                       </div>
-                      <div>
-                        <span className="text-muted-foreground">Band:</span>{" "}
-                        {classification?.capexBand
-                          ? CAPEX_BANDS.find(
-                              (b) => b.value === classification.capexBand
-                            )?.label || classification.capexBand
-                          : "—"}
+                      <div className="flex flex-wrap gap-2">
+                        {editableClassification?.vendorType ? (
+                          <Badge
+                            variant={
+                              editableClassification.vendorType === "capex"
+                                ? "default"
+                                : "secondary"
+                            }
+                          >
+                            {getVendorTypeLabel(
+                              editableClassification.vendorType
+                            )}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">Unclassified</Badge>
+                        )}
+                        {getVendorSubtypeLabel(editableClassification) && (
+                          <Badge variant="outline">
+                            {getVendorSubtypeLabel(editableClassification)}
+                          </Badge>
+                        )}
+                        {getVendorBandLabel(editableClassification) && (
+                          <Badge variant="outline">
+                            {getVendorBandLabel(editableClassification)}
+                          </Badge>
+                        )}
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Vendor Type</Label>
+                        <Select
+                          value={
+                            editableClassification?.vendorType ||
+                            UNCLASSIFIED_VALUE
+                          }
+                          onValueChange={(value) => {
+                            const nextType =
+                              value === UNCLASSIFIED_VALUE
+                                ? null
+                                : (value as "capex" | "opex");
+                            setClassification((prev) => {
+                              const next =
+                                prev || createEmptyClassification(vendorId);
+                              if (nextType === "capex") {
+                                return {
+                                  ...next,
+                                  vendorType: "capex",
+                                  opexSubType: null,
+                                  opexBand: null,
+                                  capexSubType:
+                                    prev?.vendorType === "capex"
+                                      ? prev.capexSubType
+                                      : null,
+                                  capexBand:
+                                    prev?.vendorType === "capex"
+                                      ? prev.capexBand
+                                      : null,
+                                };
+                              }
+                              if (nextType === "opex") {
+                                return {
+                                  ...next,
+                                  vendorType: "opex",
+                                  opexSubType:
+                                    prev?.vendorType === "opex"
+                                      ? prev.opexSubType
+                                      : null,
+                                  opexBand:
+                                    prev?.vendorType === "opex"
+                                      ? prev.opexBand
+                                      : null,
+                                  capexSubType: null,
+                                  capexBand: null,
+                                };
+                              }
+                              return {
+                                ...next,
+                                vendorType: null,
+                                opexSubType: null,
+                                opexBand: null,
+                                capexSubType: null,
+                                capexBand: null,
+                              };
+                            });
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select vendor type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={UNCLASSIFIED_VALUE}>
+                              Unclassified
+                            </SelectItem>
+                            {VENDOR_TYPE_OPTIONS.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {editableClassification?.vendorType === "opex" && (
+                        <div className="space-y-2">
+                          <Label>Opex Segregation</Label>
+                          <Select
+                            value={
+                              editableClassification.opexSubType || NONE_VALUE
+                            }
+                            onValueChange={(value) =>
+                              setClassification((prev) => ({
+                                ...(prev || createEmptyClassification(vendorId)),
+                                vendorType: "opex",
+                                opexSubType:
+                                  value === NONE_VALUE
+                                    ? null
+                                    : (value as NonNullable<
+                                        VendorClassification["opexSubType"]
+                                      >),
+                                opexBand: prev?.opexBand || null,
+                                capexSubType: null,
+                                capexBand: null,
+                              }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select opex segregation" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NONE_VALUE}>
+                                Not set
+                              </SelectItem>
+                              {OPEX_SUBTYPE_OPTIONS.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {editableClassification?.vendorType === "capex" && (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Capex Segregation</Label>
+                            <Select
+                              value={
+                                editableClassification.capexSubType ||
+                                NONE_VALUE
+                              }
+                              onValueChange={(value) =>
+                                setClassification((prev) => ({
+                                  ...(prev ||
+                                    createEmptyClassification(vendorId)),
+                                  vendorType: "capex",
+                                  opexSubType: null,
+                                  opexBand: null,
+                                  capexSubType:
+                                    value === NONE_VALUE
+                                      ? null
+                                      : (value as NonNullable<
+                                          VendorClassification["capexSubType"]
+                                        >),
+                                  capexBand: prev?.capexBand || null,
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select capex segregation" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={NONE_VALUE}>
+                                  Not set
+                                </SelectItem>
+                                {CAPEX_SUBTYPE_OPTIONS.map((option) => (
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value}
+                                  >
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Capex Band</Label>
+                            <Select
+                              value={editableClassification.capexBand || NONE_VALUE}
+                              onValueChange={(value) =>
+                                setClassification((prev) => ({
+                                  ...(prev ||
+                                    createEmptyClassification(vendorId)),
+                                  vendorType: "capex",
+                                  opexSubType: null,
+                                  opexBand: null,
+                                  capexSubType: prev?.capexSubType || null,
+                                  capexBand:
+                                    value === NONE_VALUE
+                                      ? null
+                                      : (value as NonNullable<
+                                          VendorClassification["capexBand"]
+                                        >),
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select capex band" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={NONE_VALUE}>Not set</SelectItem>
+                                {CAPEX_BANDS.map((band) => (
+                                  <SelectItem
+                                    key={band.value}
+                                    value={band.value || NONE_VALUE}
+                                  >
+                                    {band.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
+
+                      {editableClassification?.vendorType === "opex" && (
+                        <div className="space-y-2">
+                          <Label>Opex Band</Label>
+                          <Select
+                            value={editableClassification.opexBand || NONE_VALUE}
+                            onValueChange={(value) =>
+                              setClassification((prev) => ({
+                                ...(prev || createEmptyClassification(vendorId)),
+                                vendorType: "opex",
+                                opexSubType: prev?.opexSubType || null,
+                                opexBand:
+                                  value === NONE_VALUE
+                                    ? null
+                                    : (value as NonNullable<
+                                        VendorClassification["opexBand"]
+                                      >),
+                                capexSubType: null,
+                                capexBand: null,
+                              }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select opex band" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NONE_VALUE}>Not set</SelectItem>
+                              {OPEX_BANDS.map((band) => (
+                                <SelectItem
+                                  key={band.value}
+                                  value={band.value || NONE_VALUE}
+                                >
+                                  {band.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs text-muted-foreground">
+                        This updates the shared admin classification used by the
+                        dashboard, analytics, and rankings.
+                      </p>
+                      <Button
+                        onClick={handleSaveClassification}
+                        disabled={savingClassification}
+                      >
+                        {savingClassification
+                          ? "Saving..."
+                          : "Save Classification"}
+                      </Button>
                     </div>
                   </div>
 
@@ -362,257 +782,274 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
 
             {/* ===== REVIEWERS TAB ===== */}
             <TabsContent value="reviewers" className="space-y-6 mt-4">
-              {(
-                ["site", "procurement", "financial"] as GradingSectionType[]
-              ).map((section) => {
-                const SIcon = SECTION_ICONS[section];
-                const sectionAssignments = assignmentsForSection(section);
-                const sectionRatings = ratingsForSection(section);
-                const params = getParametersForSection(section);
-                const hasRatings =
-                  Object.keys(sectionRatings).length === params.length;
+              {supplementaryLoading && !supplementaryLoaded ? (
+                <div className="py-12 text-center text-muted-foreground animate-pulse">
+                  Loading reviewer assignments...
+                </div>
+              ) : (
+                (["site", "procurement", "financial"] as GradingSectionType[]).map(
+                  (section) => {
+                    const SIcon = SECTION_ICONS[section];
+                    const sectionAssignments = assignmentsForSection(section);
+                    const sectionRatings = ratingsForSection(section);
+                    const params = getParametersForSection(section);
+                    const hasRatings =
+                      Object.keys(sectionRatings).length === params.length;
 
-                return (
-                  <div
-                    key={section}
-                    className="border border-border rounded-xl overflow-hidden"
-                  >
-                    <div className="bg-muted/50 px-4 py-3 flex items-center gap-3">
-                      <SIcon className="w-5 h-5 text-primary" />
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-sm">
-                          {SECTION_LABELS[section]}
-                        </h3>
-                        <p className="text-xs text-muted-foreground">
-                          Responsibility: {SECTION_RESPONSIBILITY[section]}
-                        </p>
-                      </div>
-                      {hasRatings ? (
-                        <Badge variant="default" className="bg-emerald-500">
-                          <CheckCircle2 className="w-3 h-3 mr-1" />
-                          Rated
-                        </Badge>
-                      ) : sectionAssignments.length > 0 ? (
-                        <Badge variant="secondary">
-                          <Clock className="w-3 h-3 mr-1" />
-                          Assigned
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="text-muted-foreground"
-                        >
-                          Not assigned
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="p-4 space-y-3">
-                      {/* Current assignments */}
-                      {sectionAssignments.length > 0 && (
-                        <div className="space-y-2">
-                          {sectionAssignments.map((a) => (
-                            <div
-                              key={a.id}
-                              className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2"
+                    return (
+                      <div
+                        key={section}
+                        className="border border-border rounded-xl overflow-hidden"
+                      >
+                        <div className="bg-muted/50 px-4 py-3 flex items-center gap-3">
+                          <SIcon className="w-5 h-5 text-primary" />
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-sm">
+                              {SECTION_LABELS[section]}
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                              Responsibility: {SECTION_RESPONSIBILITY[section]}
+                            </p>
+                          </div>
+                          {hasRatings ? (
+                            <Badge variant="default" className="bg-emerald-500">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Rated
+                            </Badge>
+                          ) : sectionAssignments.length > 0 ? (
+                            <Badge variant="secondary">
+                              <Clock className="w-3 h-3 mr-1" />
+                              Assigned
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-muted-foreground"
                             >
-                              <div className="text-sm">
-                                <span className="font-medium">
-                                  {a.reviewerEmail}
-                                </span>
-                                <span className="text-xs text-muted-foreground ml-2">
-                                  assigned{" "}
-                                  {new Date(a.assignedAt).toLocaleDateString()}
-                                </span>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRemoveAssignment(a.id!)}
-                                className="text-destructive hover:text-destructive"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
-                            </div>
-                          ))}
+                              Not assigned
+                            </Badge>
+                          )}
                         </div>
-                      )}
 
-                      {/* Add new reviewer */}
-                      <div className="flex items-center gap-2">
-                        <Input
-                          placeholder={`Assign reviewer email for ${SECTION_LABELS[section]}...`}
-                          value={newReviewerEmails[section]}
-                          onChange={(e) =>
-                            setNewReviewerEmails((prev) => ({
-                              ...prev,
-                              [section]: e.target.value,
-                            }))
-                          }
-                          className="flex-1 text-sm"
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter")
-                              handleAssignReviewer(section);
-                          }}
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => handleAssignReviewer(section)}
-                          disabled={assigning === section}
-                        >
-                          <UserPlus className="w-4 h-4 mr-1" />
-                          {assigning === section ? "..." : "Assign"}
-                        </Button>
+                        <div className="p-4 space-y-3">
+                          {sectionAssignments.length > 0 && (
+                            <div className="space-y-2">
+                              {sectionAssignments.map((a) => (
+                                <div
+                                  key={a.id}
+                                  className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2"
+                                >
+                                  <div className="text-sm">
+                                    <span className="font-medium">
+                                      {a.reviewerEmail}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground ml-2">
+                                      assigned{" "}
+                                      {new Date(
+                                        a.assignedAt
+                                      ).toLocaleDateString()}
+                                    </span>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveAssignment(a.id!)}
+                                    className="text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2">
+                            <Input
+                              placeholder={`Assign reviewer email for ${SECTION_LABELS[section]}...`}
+                              value={newReviewerEmails[section]}
+                              onChange={(e) =>
+                                setNewReviewerEmails((prev) => ({
+                                  ...prev,
+                                  [section]: e.target.value,
+                                }))
+                              }
+                              className="flex-1 text-sm"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter")
+                                  handleAssignReviewer(section);
+                              }}
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => handleAssignReviewer(section)}
+                              disabled={assigning === section}
+                            >
+                              <UserPlus className="w-4 h-4 mr-1" />
+                              {assigning === section ? "..." : "Assign"}
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  }
+                )
+              )}
             </TabsContent>
 
             {/* ===== RATINGS TAB ===== */}
             <TabsContent value="ratings" className="space-y-6 mt-4">
-              {(
-                ["site", "procurement", "financial"] as GradingSectionType[]
-              ).map((section) => {
-                const SIcon = SECTION_ICONS[section];
-                const params = getParametersForSection(section);
-                const sectionRatings = ratingsForSection(section);
-                const hasAny = Object.keys(sectionRatings).length > 0;
+              {supplementaryLoading && !supplementaryLoaded ? (
+                <div className="py-12 text-center text-muted-foreground animate-pulse">
+                  Loading ratings...
+                </div>
+              ) : (
+                (["site", "procurement", "financial"] as GradingSectionType[]).map(
+                  (section) => {
+                    const SIcon = SECTION_ICONS[section];
+                    const params = getParametersForSection(section);
+                    const sectionRatings = ratingsForSection(section);
+                    const hasAny = Object.keys(sectionRatings).length > 0;
 
-                // Compute section score
-                const ratingValues: Record<string, number> = {};
-                Object.entries(sectionRatings).forEach(([k, v]) => {
-                  ratingValues[k] = v.rating;
-                });
-                let sectionScore = 0;
-                params.forEach((p) => {
-                  const r = ratingValues[p.key] || 0;
-                  sectionScore += (r / 5) * p.weight;
-                });
-                sectionScore = Math.round(sectionScore * 100) / 100;
-                const maxScore = params.reduce((s, p) => s + p.weight, 0);
+                    const ratingValues: Record<string, number> = {};
+                    Object.entries(sectionRatings).forEach(([k, v]) => {
+                      ratingValues[k] = v.rating;
+                    });
+                    let sectionScore = 0;
+                    params.forEach((p) => {
+                      const r = ratingValues[p.key] || 0;
+                      sectionScore += (r / 5) * p.weight;
+                    });
+                    sectionScore = Math.round(sectionScore * 100) / 100;
+                    const maxScore = params.reduce((s, p) => s + p.weight, 0);
 
-                return (
-                  <div
-                    key={section}
-                    className="border border-border rounded-xl overflow-hidden"
-                  >
-                    <div className="bg-muted/50 px-4 py-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <SIcon className="w-5 h-5 text-primary" />
-                        <h3 className="font-semibold text-sm">
-                          {SECTION_LABELS[section]}
-                        </h3>
-                      </div>
-                      {hasAny && (
-                        <div className="text-right">
-                          <span className="text-lg font-bold text-primary">
-                            {sectionScore.toFixed(1)}
-                          </span>
-                          <span className="text-sm text-muted-foreground">
-                            /{maxScore}
-                          </span>
+                    return (
+                      <div
+                        key={section}
+                        className="border border-border rounded-xl overflow-hidden"
+                      >
+                        <div className="bg-muted/50 px-4 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <SIcon className="w-5 h-5 text-primary" />
+                            <h3 className="font-semibold text-sm">
+                              {SECTION_LABELS[section]}
+                            </h3>
+                          </div>
+                          {hasAny && (
+                            <div className="text-right">
+                              <span className="text-lg font-bold text-primary">
+                                {sectionScore.toFixed(1)}
+                              </span>
+                              <span className="text-sm text-muted-foreground">
+                                /{maxScore}
+                              </span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
 
-                    <div className="p-4">
-                      {!hasAny ? (
-                        <p className="text-sm text-muted-foreground text-center py-4">
-                          No ratings submitted yet for this section.
-                        </p>
-                      ) : (
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-border">
-                              <th className="text-left py-2 px-2 font-medium">
-                                #
-                              </th>
-                              <th className="text-left py-2 px-2 font-medium">
-                                Parameter
-                              </th>
-                              <th className="text-center py-2 px-2 font-medium">
-                                Weight
-                              </th>
-                              <th className="text-center py-2 px-2 font-medium">
-                                Rating
-                              </th>
-                              <th className="text-center py-2 px-2 font-medium">
-                                Score
-                              </th>
-                              <th className="text-left py-2 px-2 font-medium">
-                                Rated By
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {params.map((param) => {
-                              const r = sectionRatings[param.key];
-                              const rating = r?.rating || 0;
-                              const score =
-                                rating > 0
-                                  ? ((rating / 5) * param.weight).toFixed(2)
-                                  : "—";
-
-                              return (
-                                <tr
-                                  key={param.key}
-                                  className="border-b border-border/50"
-                                >
-                                  <td className="py-2 px-2 text-muted-foreground">
-                                    {param.srNo}
-                                  </td>
-                                  <td className="py-2 px-2">
-                                    <p className="font-medium">{param.name}</p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {param.description}
-                                    </p>
-                                  </td>
-                                  <td className="py-2 px-2 text-center">
-                                    {param.weight}%
-                                  </td>
-                                  <td className="py-2 px-2 text-center">
-                                    {rating > 0 ? (
-                                      <div>
-                                        <span className="font-bold">
-                                          {rating}
-                                        </span>
-                                        <span className="text-muted-foreground">
-                                          /5
-                                        </span>
-                                        <p className="text-[10px] text-muted-foreground">
-                                          {RATING_LABELS[rating]}
-                                        </p>
-                                      </div>
-                                    ) : (
-                                      <span className="text-muted-foreground">
-                                        —
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="py-2 px-2 text-center font-mono">
-                                    {score}
-                                  </td>
-                                  <td className="py-2 px-2 text-xs text-muted-foreground">
-                                    {r?.ratedBy || "—"}
-                                  </td>
+                        <div className="p-4">
+                          {!hasAny ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">
+                              No ratings submitted yet for this section.
+                            </p>
+                          ) : (
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-border">
+                                  <th className="text-left py-2 px-2 font-medium">
+                                    #
+                                  </th>
+                                  <th className="text-left py-2 px-2 font-medium">
+                                    Parameter
+                                  </th>
+                                  <th className="text-center py-2 px-2 font-medium">
+                                    Weight
+                                  </th>
+                                  <th className="text-center py-2 px-2 font-medium">
+                                    Rating
+                                  </th>
+                                  <th className="text-center py-2 px-2 font-medium">
+                                    Score
+                                  </th>
+                                  <th className="text-left py-2 px-2 font-medium">
+                                    Rated By
+                                  </th>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                              </thead>
+                              <tbody>
+                                {params.map((param) => {
+                                  const r = sectionRatings[param.key];
+                                  const rating = r?.rating || 0;
+                                  const score =
+                                    rating > 0
+                                      ? ((rating / 5) * param.weight).toFixed(2)
+                                      : "—";
+
+                                  return (
+                                    <tr
+                                      key={param.key}
+                                      className="border-b border-border/50"
+                                    >
+                                      <td className="py-2 px-2 text-muted-foreground">
+                                        {param.srNo}
+                                      </td>
+                                      <td className="py-2 px-2">
+                                        <p className="font-medium">
+                                          {param.name}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                          {param.description}
+                                        </p>
+                                      </td>
+                                      <td className="py-2 px-2 text-center">
+                                        {param.weight}%
+                                      </td>
+                                      <td className="py-2 px-2 text-center">
+                                        {rating > 0 ? (
+                                          <div>
+                                            <span className="font-bold">
+                                              {rating}
+                                            </span>
+                                            <span className="text-muted-foreground">
+                                              /5
+                                            </span>
+                                            <p className="text-[10px] text-muted-foreground">
+                                              {RATING_LABELS[rating]}
+                                            </p>
+                                          </div>
+                                        ) : (
+                                          <span className="text-muted-foreground">
+                                            —
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="py-2 px-2 text-center font-mono">
+                                        {score}
+                                      </td>
+                                      <td className="py-2 px-2 text-xs text-muted-foreground">
+                                        {r?.ratedBy || "—"}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                )
+              )}
             </TabsContent>
 
             {/* ===== GRADE TAB ===== */}
             <TabsContent value="grade" className="space-y-6 mt-4">
               {/* Current Grade Display */}
-              {grade ? (
+              {supplementaryLoading && !supplementaryLoaded ? (
+                <div className="py-12 text-center text-muted-foreground animate-pulse">
+                  Loading grade summary...
+                </div>
+              ) : grade ? (
                 <div className="space-y-4">
                   {/* Score breakdown */}
                   <div className="bg-muted/30 rounded-xl p-6">

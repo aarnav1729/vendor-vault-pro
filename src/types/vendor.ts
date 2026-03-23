@@ -136,6 +136,56 @@ export type CapexBand =
   | "more_than_100Cr"
   | null;
 
+export type OpexBand = CapexBand;
+
+export const VENDOR_TYPE_OPTIONS: {
+  value: Exclude<VendorType, null>;
+  label: string;
+}[] = [
+  { value: "capex", label: "Capex" },
+  { value: "opex", label: "Opex" },
+];
+
+export const OPEX_SUBTYPE_OPTIONS: {
+  value: Exclude<OpexSubType, null>;
+  label: string;
+}[] = [
+  { value: "raw_material", label: "Raw Material" },
+  { value: "consumables", label: "Consumables" },
+  { value: "service", label: "Service Vendors" },
+];
+
+export const CAPEX_SUBTYPE_OPTIONS: {
+  value: Exclude<CapexSubType, null>;
+  label: string;
+}[] = [
+  { value: "civil", label: "Civil Vendors" },
+  { value: "plant_machinery", label: "Plant & Machinery" },
+  { value: "utilities", label: "Utilities" },
+  { value: "service", label: "Service Vendors" },
+];
+
+export const VENDOR_TYPE_LABELS: Record<Exclude<VendorType, null>, string> = {
+  capex: "Capex",
+  opex: "Opex",
+};
+
+export const OPEX_SUBTYPE_LABELS: Record<Exclude<OpexSubType, null>, string> = {
+  raw_material: "Raw Material",
+  consumables: "Consumables",
+  service: "Service Vendors",
+};
+
+export const CAPEX_SUBTYPE_LABELS: Record<
+  Exclude<CapexSubType, null>,
+  string
+> = {
+  civil: "Civil Vendors",
+  plant_machinery: "Plant & Machinery",
+  utilities: "Utilities",
+  service: "Service Vendors",
+};
+
 /* ========================= NEW GRADING SYSTEM ========================= */
 
 /** Rating value: 1–5 */
@@ -535,6 +585,7 @@ export interface VendorClassification {
   vendorId: string;
   vendorType: VendorType;
   opexSubType: OpexSubType;
+  opexBand: OpexBand;
   capexSubType: CapexSubType;
   capexBand: CapexBand;
   scores: VendorScores;
@@ -678,3 +729,56 @@ export const CAPEX_BANDS: { value: CapexBand; label: string }[] = [
   { value: "50Cr_to_100Cr", label: "₹50Cr - ₹100Cr" },
   { value: "more_than_100Cr", label: "> ₹100Cr" },
 ];
+
+export const OPEX_BANDS: { value: OpexBand; label: string }[] = CAPEX_BANDS;
+
+export function getVendorTypeLabel(type: VendorType): string | null {
+  if (!type) return null;
+  return VENDOR_TYPE_LABELS[type];
+}
+
+export function getVendorSubtypeLabel(
+  classification?:
+    | {
+        vendorType: VendorType;
+        opexSubType: OpexSubType;
+        capexSubType: CapexSubType;
+      }
+    | null
+): string | null {
+  if (!classification?.vendorType) return null;
+  if (classification.vendorType === "opex") {
+    return classification.opexSubType
+      ? OPEX_SUBTYPE_LABELS[classification.opexSubType]
+      : null;
+  }
+  return classification.capexSubType
+    ? CAPEX_SUBTYPE_LABELS[classification.capexSubType]
+    : null;
+}
+
+export function getCapexBandLabel(band: CapexBand): string | null {
+  if (!band) return null;
+  return CAPEX_BANDS.find((entry) => entry.value === band)?.label || null;
+}
+
+export function getOpexBandLabel(band: OpexBand): string | null {
+  if (!band) return null;
+  return OPEX_BANDS.find((entry) => entry.value === band)?.label || null;
+}
+
+export function getVendorBandLabel(
+  classification?:
+    | {
+        vendorType: VendorType;
+        opexBand?: OpexBand;
+        capexBand?: CapexBand;
+      }
+    | null
+): string | null {
+  if (!classification?.vendorType) return null;
+  if (classification.vendorType === "opex") {
+    return getOpexBandLabel(classification.opexBand || null);
+  }
+  return getCapexBandLabel(classification.capexBand || null);
+}

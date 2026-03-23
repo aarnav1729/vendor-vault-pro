@@ -16,9 +16,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getAllVendors,
-  getVendorById,
   getAllClassifications,
-  saveClassification,
+  getAllGrades,
   getScoringMatrix,
   saveScoringMatrix,
 } from "@/lib/db";
@@ -26,8 +25,11 @@ import {
 import {
   VendorFormData,
   VendorClassification,
+  VendorGrade,
   ScoringMatrix,
-  CAPEX_BANDS,
+  getVendorBandLabel,
+  getVendorSubtypeLabel,
+  getVendorTypeLabel,
 } from "@/types/vendor";
 import VendorDetailModal from "@/components/admin/VendorDetailModal";
 import { ScoringMatrixEditor } from "@/components/admin/ScoringMatrixEditor";
@@ -49,6 +51,9 @@ import {
   BarChart3,
 } from "lucide-react";
 
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
 const AdminDashboard: React.FC = () => {
   const [vendors, setVendors] = useState<VendorFormData[]>([]);
   const [classifications, setClassifications] = useState<
@@ -65,9 +70,12 @@ const AdminDashboard: React.FC = () => {
   const [selectedVendors, setSelectedVendors] = useState<Set<string>>(
     new Set()
   );
-  const [selectedVendor, setSelectedVendor] = useState<VendorFormData | null>(
-    null
-  );
+  const [grades, setGrades] = useState<Map<string, VendorGrade>>(new Map());
+  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
+  const [selectedVendorPreview, setSelectedVendorPreview] =
+    useState<VendorFormData | null>(null);
+  const [selectedVendorClassification, setSelectedVendorClassification] =
+    useState<VendorClassification | null>(null);
   const [showScoring, setShowScoring] = useState(false);
   const [sortConfig, setSortConfig] = useState<{
     key: string;
@@ -87,11 +95,13 @@ const AdminDashboard: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [vendorList, classificationList, matrix] = await Promise.all([
-        getAllVendors(),
-        getAllClassifications(),
-        getScoringMatrix(),
-      ]);
+      const [vendorList, classificationList, matrix, gradeList] =
+        await Promise.all([
+          getAllVendors(),
+          getAllClassifications(),
+          getScoringMatrix(),
+          getAllGrades().catch(() => []),
+        ]);
 
       setVendors(vendorList);
 
@@ -99,16 +109,21 @@ const AdminDashboard: React.FC = () => {
       classificationList.forEach((c) => classMap.set(c.vendorId, c));
       setClassifications(classMap);
 
+      const gradeMap = new Map<string, VendorGrade>();
+      gradeList.forEach((grade) => gradeMap.set(grade.vendorId, grade));
+      setGrades(gradeMap);
+
       setScoringMatrix(matrix);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("Admin loadData failed:", e);
       toast({
         title: "Failed to load",
-        description: String(e?.message || e),
+        description: getErrorMessage(e),
         variant: "destructive",
       });
       setVendors([]);
       setClassifications(new Map());
+      setGrades(new Map());
     }
   };
 
@@ -145,7 +160,8 @@ const AdminDashboard: React.FC = () => {
     // Sorting
     if (sortConfig) {
       result = [...result].sort((a, b) => {
-        let aVal: any, bVal: any;
+        let aVal: string | number | Date;
+        let bVal: string | number | Date;
 
         switch (sortConfig.key) {
           case "companyName":
@@ -237,6 +253,12 @@ const AdminDashboard: React.FC = () => {
     navigate("/");
   };
 
+  const handleOpenVendor = (vendor: VendorFormData) => {
+    setSelectedVendorId(vendor.id!);
+    setSelectedVendorPreview(vendor);
+    setSelectedVendorClassification(classifications.get(vendor.id!) || null);
+  };
+
   const stats = useMemo(() => {
     const total = vendors.length;
     const complete = vendors.filter(
@@ -282,7 +304,7 @@ const AdminDashboard: React.FC = () => {
                 onClick={() => setShowScoring(true)}
               >
                 <Settings className="w-4 h-4 mr-2" />
-                Scoring Matrix
+                Scoring & Weightage
               </Button>
               <Button variant="ghost" size="sm" onClick={handleLogout}>
                 <LogOut className="w-4 h-4 mr-2" />
@@ -384,7 +406,9 @@ const AdminDashboard: React.FC = () => {
                 </div>
                 <Select
                   value={filterComplete}
-                  onValueChange={(v: any) => setFilterComplete(v)}
+                  onValueChange={(v) =>
+                    setFilterComplete(v as "all" | "complete" | "incomplete")
+                  }
                 >
                   <SelectTrigger className="w-[160px]">
                     <Filter className="w-4 h-4 mr-2" />
@@ -457,9 +481,9 @@ const AdminDashboard: React.FC = () => {
                           <ArrowUpDown className="w-4 h-4" />
                         </div>
                       </th>
-                      <th className="p-4 text-left">Type</th>
+                      <th className="p-4 text-left">Type / Segregation</th>
                       <th className="p-4 text-left">Band</th>
-                      <th className="p-4 text-left">Score</th>
+                      <th className="p-4 text-left">Review Score</th>
                       <th
                         className="p-4 text-left cursor-pointer hover:bg-muted/80"
                         onClick={() => handleSort("updatedAt")}
@@ -475,7 +499,17 @@ const AdminDashboard: React.FC = () => {
                   <tbody>
                     {filteredVendors.map((vendor) => {
                       const classification = classifications.get(vendor.id!);
+                      const grade = grades.get(vendor.id!);
                       const isComplete = vendor.completionPercentage === 100;
+                      const vendorTypeLabel = getVendorTypeLabel(
+                        classification?.vendorType || null
+                      );
+                      const subtypeLabel = getVendorSubtypeLabel(
+                        classification || null
+                      );
+                      const bandLabel = getVendorBandLabel(
+                        classification || null
+                      );
 
                       return (
                         <tr
@@ -526,28 +560,45 @@ const AdminDashboard: React.FC = () => {
                             </div>
                           </td>
                           <td className="p-4">
-                            {classification?.vendorType && (
-                              <Badge
-                                variant={
-                                  classification.vendorType === "capex"
-                                    ? "default"
-                                    : "secondary"
-                                }
-                              >
-                                {classification.vendorType.toUpperCase()}
-                              </Badge>
+                            {vendorTypeLabel ? (
+                              <div className="space-y-1">
+                                <Badge
+                                  variant={
+                                    classification?.vendorType === "capex"
+                                      ? "default"
+                                      : "secondary"
+                                  }
+                                >
+                                  {vendorTypeLabel}
+                                </Badge>
+                                <p className="text-xs text-muted-foreground">
+                                  {subtypeLabel || "Subtype not set"}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                Unclassified
+                              </span>
                             )}
                           </td>
                           <td className="p-4 text-sm text-muted-foreground">
-                            {classification?.capexBand &&
-                              CAPEX_BANDS.find(
-                                (b) => b.value === classification.capexBand
-                              )?.label}
+                            {bandLabel || "—"}
                           </td>
                           <td className="p-4">
-                            {classification?.totalScore !== undefined && (
-                              <span className="font-medium">
-                                {classification.totalScore}
+                            {grade ? (
+                              <div className="space-y-1">
+                                <span className="font-medium">
+                                  {grade.totalScore.toFixed(1)}
+                                </span>
+                                {grade.finalGrade && (
+                                  <Badge variant="outline">
+                                    Grade {grade.finalGrade}
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                —
                               </span>
                             )}
                           </td>
@@ -559,16 +610,7 @@ const AdminDashboard: React.FC = () => {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={async () => {
-                                  try {
-                                    const full = await getVendorById(
-                                      vendor.id!
-                                    );
-                                    setSelectedVendor(full || vendor);
-                                  } catch (e) {
-                                    setSelectedVendor(vendor);
-                                  }
-                                }}
+                                onClick={() => handleOpenVendor(vendor)}
                               >
                                 <Eye className="w-4 h-4" />
                               </Button>
@@ -611,10 +653,16 @@ const AdminDashboard: React.FC = () => {
 
       {/* Vendor Detail Modal */}
       <VendorDetailModal
-        vendorId={selectedVendor?.id || null}
-        open={!!selectedVendor}
+        vendorId={selectedVendorId}
+        initialVendor={selectedVendorPreview}
+        initialClassification={selectedVendorClassification}
+        open={!!selectedVendorId}
         onOpenChange={(open) => {
-          if (!open) setSelectedVendor(null);
+          if (!open) {
+            setSelectedVendorId(null);
+            setSelectedVendorPreview(null);
+            setSelectedVendorClassification(null);
+          }
         }}
         onUpdate={loadData}
       />

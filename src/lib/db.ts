@@ -441,8 +441,24 @@ export const saveClassification = async (
 export const getClassification = async (
   vendorId: string
 ): Promise<VendorClassification | undefined> => {
-  const db = await getDB();
-  return db.get("classifications", vendorId);
+  try {
+    const data = await apiJson<{
+      ok: true;
+      classification: VendorClassification | null;
+    }>(`/admin/classifications/${vendorId}`);
+
+    if (data.classification) {
+      try {
+        const db = await getDB();
+        await db.put("classifications", data.classification);
+      } catch {}
+    }
+
+    return data.classification || undefined;
+  } catch {
+    const db = await getDB();
+    return db.get("classifications", vendorId);
+  }
 };
 
 export const getAllClassifications = async (): Promise<

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { getVendorBandLabel, getVendorTypeLabel } from "@/types/vendor";
 import {
   ArrowLeft,
   Trophy,
@@ -379,11 +380,18 @@ const VendorRanking: React.FC = () => {
                         <td className="py-3 px-3">
                           <p className="font-medium">{r.companyName || "—"}</p>
                           <p className="text-xs text-muted-foreground">{r.email}</p>
-                          {r.vendorType && (
-                            <Badge variant="outline" className="text-xs mt-1">
-                              {r.vendorType}
-                            </Badge>
-                          )}
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {r.vendorType && (
+                              <Badge variant="outline" className="text-xs">
+                                {getVendorTypeLabel(r.vendorType) || r.vendorType}
+                              </Badge>
+                            )}
+                            {getVendorBandLabel(r) && (
+                              <Badge variant="outline" className="text-xs">
+                                {getVendorBandLabel(r)}
+                              </Badge>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-2 text-center font-mono">
                           {r.siteScore > 0 ? r.siteScore.toFixed(1) : "—"}

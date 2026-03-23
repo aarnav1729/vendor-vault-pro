@@ -1,5 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { VendorFormData, VendorClassification, CAPEX_BANDS } from '@/types/vendor';
+import {
+  VendorFormData,
+  VendorClassification,
+  CAPEX_BANDS,
+  CAPEX_SUBTYPE_LABELS,
+  OPEX_SUBTYPE_LABELS,
+} from '@/types/vendor';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
@@ -23,7 +29,20 @@ type DrillDownFilter = {
   band?: string;
 };
 
+type ChartTooltipProps = {
+  active?: boolean;
+  payload?: Array<{ name?: string; value?: number }>;
+  label?: string;
+};
+
 const COLORS = ['hsl(var(--primary))', 'hsl(var(--accent))', 'hsl(var(--info))', 'hsl(var(--warning))', 'hsl(var(--success))', 'hsl(var(--destructive))'];
+
+const getBandValue = (classification?: VendorClassification) => {
+  if (!classification?.vendorType) return null;
+  return classification.vendorType === 'opex'
+    ? classification.opexBand
+    : classification.capexBand;
+};
 
 export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ vendors, classifications }) => {
   const [drillLevel, setDrillLevel] = useState<DrillDownLevel>('overview');
@@ -42,7 +61,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ vendors, class
       });
     }
     if (drillFilter.band) {
-      result = result.filter(v => classifications.get(v.id!)?.capexBand === drillFilter.band);
+      result = result.filter(v => getBandValue(classifications.get(v.id!)) === drillFilter.band);
     }
     
     return result;
@@ -70,10 +89,10 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ vendors, class
       const service = filteredVendors.filter(v => classifications.get(v.id!)?.capexSubType === 'service').length;
       
       return [
-        { name: 'Civil', value: civil, subtype: 'civil' },
-        { name: 'Plant & Machinery', value: machinery, subtype: 'plant_machinery' },
-        { name: 'Utilities', value: utilities, subtype: 'utilities' },
-        { name: 'Service', value: service, subtype: 'service' },
+        { name: CAPEX_SUBTYPE_LABELS.civil, value: civil, subtype: 'civil' },
+        { name: CAPEX_SUBTYPE_LABELS.plant_machinery, value: machinery, subtype: 'plant_machinery' },
+        { name: CAPEX_SUBTYPE_LABELS.utilities, value: utilities, subtype: 'utilities' },
+        { name: CAPEX_SUBTYPE_LABELS.service, value: service, subtype: 'service' },
       ];
     } else if (drillFilter.type === 'opex') {
       const rawMaterial = filteredVendors.filter(v => classifications.get(v.id!)?.opexSubType === 'raw_material').length;
@@ -81,19 +100,19 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ vendors, class
       const service = filteredVendors.filter(v => classifications.get(v.id!)?.opexSubType === 'service').length;
       
       return [
-        { name: 'Raw Material', value: rawMaterial, subtype: 'raw_material' },
-        { name: 'Consumables', value: consumables, subtype: 'consumables' },
-        { name: 'Service', value: service, subtype: 'service' },
+        { name: OPEX_SUBTYPE_LABELS.raw_material, value: rawMaterial, subtype: 'raw_material' },
+        { name: OPEX_SUBTYPE_LABELS.consumables, value: consumables, subtype: 'consumables' },
+        { name: OPEX_SUBTYPE_LABELS.service, value: service, subtype: 'service' },
       ];
     }
     return [];
   }, [filteredVendors, classifications, drillFilter]);
 
-  // Capex band distribution
+  // Spend band distribution
   const bandDistributionData = useMemo(() => {
     return CAPEX_BANDS.map(band => ({
       name: band.label,
-      value: filteredVendors.filter(v => classifications.get(v.id!)?.capexBand === band.value).length,
+      value: filteredVendors.filter(v => getBandValue(classifications.get(v.id!)) === band.value).length,
       band: band.value,
     })).filter(d => d.value > 0);
   }, [filteredVendors, classifications]);
@@ -174,7 +193,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ vendors, class
     }
   };
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
@@ -202,7 +221,11 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ vendors, class
               <Badge variant="outline">{drillFilter.type.toUpperCase()}</Badge>
             )}
             {drillFilter.subtype && (
-              <Badge variant="outline">{drillFilter.subtype.replace('_', ' ')}</Badge>
+              <Badge variant="outline">
+                {CAPEX_SUBTYPE_LABELS[drillFilter.subtype as keyof typeof CAPEX_SUBTYPE_LABELS] ||
+                  OPEX_SUBTYPE_LABELS[drillFilter.subtype as keyof typeof OPEX_SUBTYPE_LABELS] ||
+                  drillFilter.subtype}
+              </Badge>
             )}
             {drillFilter.band && (
               <Badge variant="outline">{CAPEX_BANDS.find(b => b.value === drillFilter.band)?.label}</Badge>
@@ -288,12 +311,12 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ vendors, class
           </CardContent>
         </Card>
 
-        {/* Capex Band Distribution */}
+        {/* Spend Band Distribution */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <BarChart2 className="w-5 h-5 text-info" />
-              Capex Band Distribution
+              {drillFilter.type === 'opex' ? 'Opex Band Distribution' : drillFilter.type === 'capex' ? 'Capex Band Distribution' : 'Spend Band Distribution'}
             </CardTitle>
           </CardHeader>
           <CardContent>
