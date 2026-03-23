@@ -41,6 +41,7 @@ import {
   getVendorTypeLabel,
 } from "@/types/vendor";
 import {
+  getDB,
   getVendorById,
   getClassification,
   saveClassification,
@@ -65,6 +66,7 @@ import {
   Clock,
   AlertTriangle,
   Star,
+  Loader2,
 } from "lucide-react";
 
 interface VendorDetailModalProps {
@@ -164,6 +166,25 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
     const requestId = ++baseRequestRef.current;
     setBaseLoading(true);
     try {
+      try {
+        const db = await getDB();
+        const [cachedVendor, cachedClassification] = await Promise.all([
+          db.get("vendors", vendorId).catch(() => null),
+          db.get("classifications", vendorId).catch(() => null),
+        ]);
+
+        if (baseRequestRef.current !== requestId) return;
+
+        if (cachedVendor) {
+          setVendor(cachedVendor);
+        }
+        if (cachedClassification) {
+          setClassification(cachedClassification);
+        }
+      } catch {
+        // Cache hydration is a best-effort fast path.
+      }
+
       const [v, cl] = await Promise.all([
         getVendorById(vendorId).catch(() => null),
         getClassification(vendorId).catch(() => null),
@@ -384,10 +405,16 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="w-5 h-5 text-primary" />
             {companyName}
+            {baseLoading && (
+              <span className="ml-auto inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Refreshing
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
 
-        {baseLoading ? (
+        {!vendor && baseLoading ? (
           <div className="py-12 text-center text-muted-foreground animate-pulse">
             Loading vendor data...
           </div>
@@ -402,6 +429,11 @@ const VendorDetailModal: React.FC<VendorDetailModalProps> = ({
 
             {/* ===== DETAILS TAB ===== */}
             <TabsContent value="details" className="space-y-4 mt-4">
+              {baseLoading && (
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Fetching the latest vendor information in the background.
+                </div>
+              )}
               {vendor && (
                 <>
                   {/* Company Details */}

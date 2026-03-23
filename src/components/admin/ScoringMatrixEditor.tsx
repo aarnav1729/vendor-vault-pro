@@ -58,7 +58,7 @@ export const ScoringMatrixEditor: React.FC<Props> = ({ matrix, onClose, onSave }
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings className="w-5 h-5" />
